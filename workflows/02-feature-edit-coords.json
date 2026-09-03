@@ -496,7 +496,7 @@
       ],
       "size": [
         320,
-        170
+        196
       ],
       "flags": {},
       "order": 9,
@@ -539,6 +539,7 @@
       "widgets_values": [
         "all levels",
         true,
+        "contact sheet",
         -1
       ],
       "title": "after"
@@ -552,7 +553,7 @@
       ],
       "size": [
         320,
-        170
+        196
       ],
       "flags": {},
       "order": 10,
@@ -595,6 +596,7 @@
       "widgets_values": [
         "final level only",
         true,
+        "contact sheet",
         -1
       ],
       "title": "before"
@@ -860,7 +862,8 @@
       },
       "widgets_values": [
         512,
-        false
+        false,
+        "contact sheet"
       ]
     },
     {

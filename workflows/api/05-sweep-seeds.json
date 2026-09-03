@@ -123,6 +123,7 @@
       "decode": true,
       "arm_limit": 12,
       "output_arm": 0,
+      "sheet_layout": "contact sheet",
       "size": 384,
       "source_levels": [
         "4",
@@ -157,7 +158,8 @@
         2
       ],
       "size": 512,
-      "decode_difference": false
+      "decode_difference": false,
+      "sheet_layout": "contact sheet"
     },
     "_meta": {
       "title": "TF Compare Levels"
@@ -173,6 +175,24 @@
     },
     "_meta": {
       "title": "where the picked arm changed, per level"
+    }
+  },
+  "13": {
+    "class_type": "TFSaveReport",
+    "inputs": {
+      "text": [
+        "9",
+        0
+      ],
+      "name": "sweep",
+      "levels": [
+        "9",
+        2
+      ],
+      "append": true
+    },
+    "_meta": {
+      "title": "keep the table \u2014 output/trajectory_forcing/"
     }
   }
 }

@@ -841,6 +841,13 @@ ever differ in two ways at once.
     compare_view = g.add("PreviewImage", 5, 12, title="where the picked arm changed, per level",
                          images=(compare, 1))
     g.group("4 · One arm in detail", [compare, compare_view], colour="#8A8")
+
+    # Wired rather than merely mentioned: the table is the output this whole
+    # graph exists to produce, and a number that lives only in a browser tab
+    # cannot be cited later. Appends, so a session's runs accumulate in one file.
+    keep = g.add("TFSaveReport", 4, 20, title="keep the table — output/trajectory_forcing/",
+                 text=(sweep, 0), levels=(sweep, 2), name="sweep", append=True)
+    g.group("5 · Keep the numbers", [keep], colour="#3f789e")
     return g
 
 

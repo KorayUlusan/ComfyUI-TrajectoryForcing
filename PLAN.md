@@ -20,7 +20,7 @@ someone using it for a real edit, which is the next thing.
 
 | build step | state |
 |---|---|
-| 1. Load + Generate + Decode | done — `gpu_smoke` 8/8, job 449818 |
+| 1. Load + Generate + Decode | done — `gpu_smoke` 8/8, job 449837 |
 | 2. Region picker, read-only | done, but not as a custom widget — see the pivot below |
 | 3. Feature edit (same-canvas and cross-canvas) | done — `TF Feature Edit`, both source modes |
 | 4. Resume, closing the loop | done — `TF Resume From Level` |
@@ -28,16 +28,16 @@ someone using it for a real edit, which is the next thing.
 
 Verification, all reproducible from this repo:
 
-- `pytest tests` — 269 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
+- `pytest tests` — 328 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
   every node's schema and `execute` against a stub pipeline.
 - `slurm/gpu_smoke.sbatch` — the nodes against the real TF-L model. **8/8,
-  job 449818**, including two controls: same class + seed reproduces the
+  job 449837**, including two controls: same class + seed reproduces the
   trajectory bit-for-bit, and the sweep's arm 0 reproduces the explicit
   edit-and-resume chain bit-for-bit. Load 16.4 s warm, generate 0.1 s, resume
   2.3 s, a three-seed sweep 0.7 s. (Superseded 7/7 on job 449604, which predates
   `TF Compare Levels` and `TF Sweep Edit`.)
 - `slurm/server_smoke.sbatch` — the workflows through a real ComfyUI server.
-  **11/11, job 449819 on mlcbm006**, 19 nodes registered, all five workflows
+  **12/12, job 449903**, 20 nodes registered, all five workflows
   executed. This is the only check that a node running several re-samples in one
   `execute` survives ComfyUI's execution engine rather than a direct call, and
   that the sweep's table reaches the client rather than only its images.
@@ -49,6 +49,11 @@ Verification, all reproducible from this repo:
   runs to get right (449615, 449616, 449617, 449618, 449655) — every failure was
   a real defect, and the last two only became visible once the test ran the
   workflow twice and watched the websocket.
+
+- `scripts/bridge_smoke.py` — the login node's bridge to the compute node,
+  driven as a browser drives it. **4/4.** The only layer that crosses the
+  `ncat` bridge, and the one that disproved a plausible diagnosis rather than
+  confirming one. Allocates a GPU, so it is run by hand, not by `pytest`.
 
 ## Pivots
 
@@ -163,7 +168,7 @@ log to watch and quitting leaves the H100 allocated until the walltime expires;
 and the tunnel instructions it printed were wrong twice over (they SSH'd into
 the compute node and forwarded it to itself, and login-to-compute SSH wants a
 password here because `~/.ssh/authorized_keys` holds a different key from
-`~/.ssh/id_ed25519.pub`). Replaced with `./serve.sh`: `srun` in the foreground so
+`~/.ssh/id_ed25519.pub`). Replaced with `./run_comfyui_slurm.sh`: `srun` in the foreground so
 the log streams and Ctrl-C cancels, plus an `ncat` bridge on the login node so
 no SSH hop to the compute node is needed at all.
 
@@ -204,7 +209,7 @@ it back in front of a browser. All three are commented where they bite.
 Launching it again turned up three more things, all of them presentation rather
 than mechanism -- which is what a working tool's problems look like.
 
-**`serve.sh` said too little at the start and too much at the end.** It now
+**`run_comfyui_slurm.sh` said too little at the start and too much at the end.** It now
 opens with what is about to happen and, specifically, the exact log line to wait
 for (`To see the GUI go to:`), because the port genuinely is not open before it
 and the silence in between reads as a hang. On Ctrl-C it now says it is
@@ -330,7 +335,7 @@ the leader leaves five processes and the port bound; killing the process group
 leaves none and releases it. The bridge now runs under `setsid` -- its own
 process group -- and cleanup kills the group.
 
-Three things came with it. `serve.sh` sweeps stale bridges of its own at
+Three things came with it. `run_comfyui_slurm.sh` sweeps stale bridges of its own at
 startup, identified by the compute node in their command line having no running
 job of ours, so an existing mess clears itself rather than needing a manual
 `pkill`. If the port is genuinely taken by something else it steps to the next
@@ -386,6 +391,164 @@ self-checking, so something else has to be.
 
 Not swept: a shape edit, which is bound to one level's region map and so has no
 meaningful axis but the seed.
+
+## A UX pass over the whole thing (2026-09-03)
+
+Six findings, ranked by what a user actually hits. Five were fixed; the sixth
+was a design choice and went back to the user.
+
+**The one that was reported as a bug first.** "I clicked Run on workflows 1 and
+5 and nothing happened." That session left **no evidence at all** — `run_comfyui_slurm.sh`
+streamed to a terminal and then `rm -f`'d its own bridge log, and
+`run_comfyui.sh` `exec`'d ComfyUI with no log file. Nothing on disk, so nothing
+to read. Both logs now persist under `outputs/comfyui_logs/`, last 20 of each,
+and `run_comfyui_slurm.sh` prints both paths on exit. ComfyUI's own `--verbose INFO FILE`
+does the writing rather than a `tee`, because a pipe makes stdout not-a-terminal
+and `srun --pty` needs a real one on both ends or Ctrl-C stops reaching ComfyUI.
+
+The likely cause, unprovable after the fact: `TF Load Pipeline` is the slowest
+thing here and was the only slow thing with **nothing to watch**. It now drives a
+three-stage progress bar (restore → compile → decoder build) and reports how
+long it took. A cached load completes the bar rather than leaving it a third of
+the way across, which reads as stuck.
+
+**A defect in the sweep's own surface.** `axis` and `values` are two widgets that
+must agree, and the default `values` only fits the default `axis` — so the first
+failure most people meet is switching to `strength` and getting *"Strength 2.0 is
+outside 0..1"*, which is true and says nothing about which widget is wrong. Every
+range error now names the coupling and gives an example.
+
+**The numbers could not leave the graph** — the biggest functional gap once the
+sweep existed. `TF Save Levels` archived latents and history; the sweep and
+compare tables lived only as text in a node body you had to select and copy. So
+the tool could measure an edit and not archive the measurement, which by this
+repo's own rule about untraceable numbers is the wrong half to be missing. **New:
+`TF Save Report`**, writing markdown fenced so the columns survive, stamped with
+the class, seed and edit history that produced them, appending so a session's
+runs accumulate in one comparable file. Wired into workflow 05.
+
+**The contact sheet was not one.** The `sheet` output was a batch of five 384px
+frames, which ComfyUI renders inside a ~320px node and `SaveImage` writes as five
+separate files — so the side-by-side comparison the node exists for was available
+in neither place. `sheet_layout` (advanced) now defaults to one stitched image, a
+row up to six arms and a near-square grid beyond, with the batch still available
+because it is the only shape that saves one file per arm. Verified at real size:
+2072×544 for four 512px frames. Deliberately *not* applied to `TF Decode Levels`
+(a sequence, often wanted individually) or `TF Compare Levels` (per-level tiles);
+only a sweep's arms are meaningless apart.
+
+Two smaller ones: `TF Sweep Edit` had five visible widgets where every other node
+has at most two, so `strength` moved to advanced; and `TF Load Levels`'s dropdown
+now says the list is rebuilt when node definitions are sent, so press R after
+saving. (`GET_SCHEMA` does re-run `define_schema` per `/object_info`, checked
+rather than assumed — the list was never actually stale, only silent about it.)
+
+**`gpu_smoke.py` had gone stale twice** — once when `which` + `level` merged, once
+when the sweep gained `sheet_layout` — and both times it failed minutes into a
+queued GPU job. It calls node `execute` methods by hand and nothing checked those
+call sites. `TestTheSmokeScriptsCallNodesCorrectly` now reads them out of the
+source with `ast` and checks them against the live schemas in the five seconds
+the rest of the suite takes. Confirmed to fail on the real bug before being kept.
+
+## The pivot on the region picker, revisited (2026-09-03)
+
+The plan's step 2 was a bespoke clickable grid widget; PLAN records dropping it
+for Painter, on the grounds that frontend code has to track ComfyUI's frontend
+releases and this artefact has to still run in a year. Asked to revisit it, that
+argument turned out to be right about *a widget that is the only way to do
+something* and wrong about a widget that decorates one.
+
+`web/tf_token_grid.js` puts a clickable 16x16 grid on TF Tokens From Coords. It
+writes into that node's existing `coords` string rather than replacing it, so:
+the selection stays a text value someone can paste into a writeup (the entire
+reason that node exists over the brush); no backend, socket or workflow changed;
+and **if the file fails to load, typing still works.** That last property is what
+makes the bet cheap, and it is the condition any change here has to keep.
+Contrast Painter, which is a Vue component and simply unusable under the classic
+renderer -- that cost a server-side detector and three paragraphs of docs.
+
+**No v1/v2 split, and that was checkable rather than a guess.** Core's own
+`AUDIO_UI` widget calls `addDOMWidget` unconditionally via `getCustomWidgets`, in
+a ComfyUI that still ships the classic renderer, and nothing near `addDOMWidget`
+branches on the renderer -- DOM widgets predate Vue nodes. One implementation
+covers both. Core has no click-a-point affordance to reuse, incidentally: its own
+spatial node (`comfy_extras/nodes_wanmove.py`) takes four float sliders.
+
+**It is the first thing in this repo no test covers**, and that is stated rather
+than papered over. There is no browser here. Two things narrow the gap:
+`tokens.format_coords` is a tested reference implementation of the notation that
+the JS must reproduce byte-for-byte (round-trip property: parse(format(m)) == m,
+and formatting twice is stable -- without it the grid silently rewrites what was
+typed the moment it is touched), and `server_smoke` now checks ComfyUI found
+`WEB_DIRECTORY`, listed the script under `/extensions`, and served the right
+file. Behaviour still needs someone to click it.
+
+## A browser session, and three wrong turns (2026-09-03)
+
+Four reports from one sitting. All four were real, and the record of how they
+were diagnosed matters more than the fixes, because three of my first
+explanations were wrong and the pattern in them is worth keeping.
+
+**`./serve.sh` exited silently, printing nothing.** Mine, and freshly
+introduced: an empty glob makes `ls` exit 2, `2>/dev/null` hides the message but
+not the status, and `set -o pipefail` carries it out through `set -e`. The line
+was the log-pruning added the same day *to diagnose a silent failure*. It was in
+both launcher scripts, so the Slurm route died on the login node and again on
+the compute node. `bash -n` cannot see this; only running the script can.
+`tests/test_scripts.py` now runs the real launcher against stubbed `srun`,
+`squeue`, `ncat`, `ss`, `setsid` and `pgrep`, so every line of setup executes.
+Reintroducing the bug fails five of its tests. Renamed to
+`run_comfyui_slurm.sh` at the same time, so it pairs with `run_comfyui.sh`
+rather than hiding that it asks Slurm for a GPU.
+
+**"Workflow 1 gives me level 0, it should give all levels."** ComfyUI grids a
+multi-image output until you *click* one, which pins the node to that frame via
+`imageIndex`. The fix was to stitch frames meant to be seen together into one
+contact sheet -- which had already been built for the sweep two hours earlier
+and **deliberately not applied here**, on the reasoning that decoded levels are
+"a sequence you often want individually". That was reasoning about saving files,
+not about looking at the thing, and looking at all four passes at once is the
+entire point of workflow 01. `sheet_layout` now covers TF Decode, TF Latent
+Preview and TF Compare Levels too, and a test asserts *every* multi-frame node
+offers it and defaults to stitched, so the next one cannot be forgotten.
+
+**"The image generates but is not visible."** Three explanations, two wrong:
+
+1. *Batch paging.* Right about the mechanism, wrong about the default --
+   ComfyUI grids images until one is clicked. Corrected to the user.
+2. *The ncat bridge is dropping the websocket.* Wrong, and the reasoning was
+   seductive: both symptoms (no progress bar, no images) travel on the
+   websocket, so one dead socket explains both, and the bridge was the one
+   component nothing tested. `Ncat: Connection reset by peer` in every bridge
+   log looked like proof. It is the ordinary teardown when the job ends.
+3. Stale per-node `imageIndex` in a page that had never been reloaded. A hard
+   reload fixed it.
+
+The lesson is not "check harder" -- it is that a hypothesis explaining two
+symptoms at once feels like evidence and is not. What settled it was building
+the missing test rather than reading more code.
+
+**`scripts/bridge_smoke.py`**, the fourth test layer. `server_smoke` talks to
+ComfyUI on the compute node's own loopback, so it never crosses the bridge --
+the exact path every human uses. The new script launches a real session and
+drives workflow 01 through it as a browser would, checking that `progress`
+events and the `executed` message carrying output images both arrive. 4/4, and
+it is what proved hypothesis 2 wrong. `CONTRIBUTING.md` now tabulates what each
+layer covers and what it is blind to; the honest line is that nothing here
+drives a browser.
+
+**One real fix fell out of it.** `ProgressBar` sends nothing when constructed --
+its first message goes out on the first `update()` -- so the bar appeared only
+*after* the checkpoint restore, the part that most needs it. It now sends 0/3 up
+front.
+
+**The clickable token grid works**, confirmed by use: it appears, typing syncs
+it, and drag-paint works. Drag was broken on first delivery by
+`setPointerCapture` on the pressed *cell*, which routes every later pointer
+event to that element so siblings never receive `pointerenter` -- and would have
+failed on touch too, where the browser captures to the pointerdown target
+implicitly. It now captures on the board and hit-tests with
+`document.elementFromPoint`.
 
 ## Next
 

@@ -108,6 +108,23 @@ class TestPlanningArms:
         with pytest.raises(ValueError, match="Unknown sweep axis"):
             sweep.plan("temperature", "1,2", **self.KW)
 
+    @pytest.mark.parametrize(
+        ("axis", "values", "example"),
+        [(sweep.STRENGTH, "1,2,3,4", "0.25,0.5,0.75,1.0"),
+         (sweep.LEVEL, "592,593", "0-3")],
+    )
+    def test_changing_the_axis_and_not_the_values_says_which_to_fix(
+            self, axis, values, example):
+        # `axis` and `values` are two widgets that have to agree, and the
+        # default `values` only fits the default `axis` -- so the first failure
+        # most people meet is a seed list read as strengths. "Strength 2.0 is
+        # outside 0..1" is true and says nothing about which widget is wrong.
+        with pytest.raises(ValueError) as caught:
+            sweep.plan(axis, values, **self.KW)
+        message = str(caught.value)
+        assert "'axis' is set to" in message
+        assert example in message
+
 
 class TestTheMeasure:
     def test_identical_canvases_are_zero(self):

@@ -6,6 +6,8 @@ and TF Decode / TF Latent Preview are the two ways to inspect the result.
 """
 from __future__ import annotations
 
+import time
+
 from comfy_api.latest import io
 
 from . import render
@@ -20,8 +22,10 @@ from .sockets import (
     auto_level_input,
     node_preview,
     pipeline_input,
+    progress_bar,
     resolve_pipeline,
     seed_input,
+    sheet_layout_input,
 )
 
 # The class both TF Generate and TF ImageNet Class start on, so a fresh graph
@@ -105,7 +109,12 @@ class TFLoadPipeline(io.ComfyNode):
                     "warmup",
                     default=True, advanced=True,
                     tooltip="Sample and decode one throwaway image at load, paying the XLA compile "
-                            "and the decoder build here instead of on the first real prompt.",
+                            "and the decoder build here -- where this node's progress bar shows "
+                            "them -- instead of on your first real prompt.\n\n"
+                            "Turning it off does not save the 1-2 minutes, it moves them to the "
+                            "first TF Generate or TF Decode, which cannot show progress for a "
+                            "single opaque compile. Leave it on unless you are loading the model "
+                            "without intending to sample.",
                 ),
             ],
             outputs=[
@@ -116,8 +125,31 @@ class TFLoadPipeline(io.ComfyNode):
 
     @classmethod
     def execute(cls, checkpoint, config, warmup) -> io.NodeOutput:
-        pipe = load_pipeline(config, checkpoint, warmup)
-        return io.NodeOutput(pipe, pipe.describe(), ui=node_preview(text=pipe.describe()))
+        # The slowest thing in the extension by a wide margin, and until now the
+        # only slow thing with nothing to watch: a first run sat for one to two
+        # minutes with an idle graph, which is indistinguishable from a hung one
+        # -- and was reported as exactly that.
+        bar = progress_bar(3)
+        # ProgressBar sends nothing when it is constructed -- its first message
+        # goes out on the first `update`. That left the whole checkpoint restore
+        # (seconds warm, most of the wait cold) with no bar on screen at all,
+        # which is the part that most needs one. Send 0/3 up front so it appears
+        # immediately rather than a third of the way in.
+        if bar:
+            bar.update_absolute(0, 3)
+        stages: list[str] = []
+
+        def on_step(label: str) -> None:
+            stages.append(label)
+            if bar:
+                bar.update(1)
+
+        started = time.perf_counter()
+        pipe = load_pipeline(config, checkpoint, warmup, on_step)
+        report = f"{pipe.describe()}\nready in {time.perf_counter() - started:.1f}s"
+        if stages:
+            report += "\n" + "; ".join(stages)
+        return io.NodeOutput(pipe, report, ui=node_preview(text=report))
 
 
 class TFImageNetClass(io.ComfyNode):
@@ -202,6 +234,7 @@ class TFDecode(io.ComfyNode):
                     tooltip="Write 'Level 2 (subparts)' under each frame, since a batch "
                             "preview shows no captions.",
                 ),
+                sheet_layout_input("the decoded levels"),
                 level_override_input(),
                 pipeline_input(),
             ],
@@ -209,7 +242,7 @@ class TFDecode(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, levels, which, label_levels, level_override,
+    def execute(cls, levels, which, label_levels, sheet_layout, level_override,
                 pipeline=None) -> io.NodeOutput:
         pipeline = resolve_pipeline(pipeline, levels, "TF Decode Levels")
         wanted = pick_levels(levels, which, level_override)
@@ -234,7 +267,7 @@ class TFDecode(io.ComfyNode):
         warning = "\n".join(n for n in notes if n)
         shown = ", ".join(str(i) for i in wanted)
         return io.NodeOutput(
-            render.to_image(frames), warning,
+            render.lay_out(frames, sheet_layout), warning,
             ui=node_preview(text=f"decoded level(s) {shown}" + (f"\n{warning}" if warning else "")),
         )
 
@@ -261,6 +294,7 @@ class TFLatentPreview(io.ComfyNode):
                             "number of pixels.",
                 ),
                 io.Boolean.Input("label_levels", default=True, advanced=True),
+                sheet_layout_input("the level tiles"),
                 level_override_input(),
                 TFLevelsSocket.Input(
                     "palette_from", optional=True,
@@ -273,7 +307,7 @@ class TFLatentPreview(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, levels, which, size, label_levels, level_override,
+    def execute(cls, levels, which, size, label_levels, sheet_layout, level_override,
                 palette_from=None, pipeline=None) -> io.NodeOutput:
         pipeline = resolve_pipeline(pipeline, levels, "TF Latent Preview")
         palette = None
@@ -289,7 +323,7 @@ class TFLatentPreview(io.ComfyNode):
             ]
         shown = ", ".join(str(i) for i in wanted)
         return io.NodeOutput(
-            render.to_image(frames), ui=node_preview(text=f"level(s) {shown}"))
+            render.lay_out(frames, sheet_layout), ui=node_preview(text=f"level(s) {shown}"))
 
 
 class TFLevelsInfo(io.ComfyNode):

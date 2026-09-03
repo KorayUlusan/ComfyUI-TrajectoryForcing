@@ -208,3 +208,57 @@ class TestRegionMapPayload:
         assert regions.num_regions == 3
         assert regions.mask_for([1]).sum() == 2
         assert regions.region_of(1, 1) == 2
+
+
+class TestFormattingCoordsBack:
+    """`format_coords` is the reference for `web/tf_token_grid.js`.
+
+    The clickable grid and the `coords` text field are two views of one value,
+    so a round trip through the grid must reproduce the text exactly rather than
+    something merely equivalent. There is no JS runtime here to test the widget
+    against, so this pins the contract it has to meet.
+    """
+
+    def mask(self, rows, cols, coords):
+        out = np.zeros((rows, cols), dtype=bool)
+        for r, c in coords:
+            out[r, c] = True
+        return out
+
+    def test_single_tokens(self):
+        assert tokens.format_coords(self.mask(8, 8, [(1, 1), (5, 5)])) == "1,1 5,5"
+
+    def test_a_run_is_collapsed(self):
+        # `7,6:9` is what someone would have typed, and what ends up in a
+        # writeup; four separate pairs is the same selection and worse notation.
+        assert tokens.format_coords(self.mask(8, 8, [(7, 6), (7, 7)])) == "7,6:7"
+
+    def test_runs_and_singles_together(self):
+        picked = [(0, 0), (2, 3), (2, 4), (2, 5), (4, 7)]
+        assert tokens.format_coords(self.mask(8, 8, picked)) == "0,0 2,3:5 4,7"
+
+    def test_a_gap_breaks_a_run(self):
+        assert tokens.format_coords(self.mask(8, 8, [(1, 0), (1, 1), (1, 3)])) == "1,0:1 1,3"
+
+    def test_a_whole_row(self):
+        row = self.mask(4, 4, [(2, c) for c in range(4)])
+        assert tokens.format_coords(row) == "2,0:3"
+
+    def test_an_empty_selection_is_the_empty_string(self):
+        assert tokens.format_coords(np.zeros((4, 4), dtype=bool)) == ""
+
+    def test_output_is_in_reading_order(self):
+        picked = [(3, 1), (0, 2), (1, 0)]
+        assert tokens.format_coords(self.mask(4, 4, picked)) == "0,2 1,0 3,1"
+
+    @pytest.mark.parametrize("seed", range(12))
+    def test_it_round_trips_through_parse_coords(self, seed):
+        # The property the widget depends on: click, read back, click again ->
+        # the same text. Anything else and the grid silently rewrites what was
+        # typed the moment it is touched.
+        rng = np.random.default_rng(seed)
+        mask = rng.random((16, 16)) < 0.3
+        text = tokens.format_coords(mask)
+        back = tokens.parse_coords(text, (16, 16))
+        np.testing.assert_array_equal(back.mask, mask)
+        assert tokens.format_coords(back.mask) == text, "second pass must be stable"

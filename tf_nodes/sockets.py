@@ -19,6 +19,43 @@ CATEGORY_EDIT = "TrajectoryForcing/edit"
 CATEGORY_IO = "TrajectoryForcing/save and load"
 
 
+def sheet_layout_input(what: str) -> io.Combo.Input:
+    """How a node's several frames are handed over: stitched, or as a batch.
+
+    Stitched by default because ComfyUI pages a batch one frame at a time behind
+    a small "1/4" button, so several frames meant to be compared arrive as one
+    frame and a control nobody finds. See `render.lay_out`.
+    """
+    from . import render
+
+    return io.Combo.Input(
+        "sheet_layout", options=render.SHEET_LAYOUTS, advanced=True,
+        tooltip=f"'contact sheet' stitches {what} into one image -- a row up to six, a "
+                "near-square grid beyond -- so they can be seen at once. 'separate frames' "
+                "returns a batch instead, which ComfyUI shows one at a time but which "
+                "SaveImage can write as one file each.",
+    )
+
+
+def progress_bar(total: int):
+    """ComfyUI's progress bar when there is one, else None.
+
+    Anything here that takes more than a few seconds needs one, because a
+    ComfyUI graph with nothing moving is indistinguishable from a hung one --
+    which is exactly how the first, slowest run reads without it.
+
+    Imported lazily and guarded: `comfy.utils` belongs to the running server,
+    not to `comfy_api`, so it is absent under the unit tests and under any
+    direct call of a node's `execute`.
+    """
+    try:
+        from comfy.utils import ProgressBar
+
+        return ProgressBar(total)
+    except Exception:  # pragma: no cover - depends on how ComfyUI was started
+        return None
+
+
 def node_preview(image=None, text: str = "") -> dict | None:
     """What a node shows in its own body.
 

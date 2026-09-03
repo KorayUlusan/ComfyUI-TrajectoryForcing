@@ -1,8 +1,8 @@
 {
   "id": "trajectory-forcing-05-sweep-seeds",
   "revision": 0,
-  "last_node_id": 12,
-  "last_link_id": 16,
+  "last_node_id": 13,
+  "last_link_id": 18,
   "nodes": [
     {
       "id": 1,
@@ -448,7 +448,9 @@
           "name": "report",
           "type": "STRING",
           "slot_index": 0,
-          "links": []
+          "links": [
+            17
+          ]
         },
         {
           "label": "sheet",
@@ -465,7 +467,8 @@
           "type": "TF_LEVELS",
           "slot_index": 2,
           "links": [
-            15
+            15,
+            18
           ]
         },
         {
@@ -498,6 +501,7 @@
         true,
         12,
         0,
+        "contact sheet",
         384
       ],
       "title": "TF Sweep Edit \u2014 the table is in this node"
@@ -610,7 +614,8 @@
       },
       "widgets_values": [
         512,
-        false
+        false,
+        "contact sheet"
       ]
     },
     {
@@ -649,6 +654,56 @@
       },
       "widgets_values": [],
       "title": "where the picked arm changed, per level"
+    },
+    {
+      "id": 13,
+      "type": "TFSaveReport",
+      "pos": [
+        1600,
+        1342
+      ],
+      "size": [
+        320,
+        170
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "text",
+          "name": "text",
+          "type": "STRING",
+          "link": 17,
+          "widget": {
+            "name": "text"
+          }
+        },
+        {
+          "label": "levels",
+          "name": "levels",
+          "type": "TF_LEVELS",
+          "link": 18
+        }
+      ],
+      "outputs": [
+        {
+          "label": "path",
+          "name": "path",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TFSaveReport"
+      },
+      "widgets_values": [
+        "",
+        "sweep",
+        true
+      ],
+      "title": "keep the table \u2014 output/trajectory_forcing/"
     }
   ],
   "links": [
@@ -779,6 +834,22 @@
       12,
       0,
       "IMAGE"
+    ],
+    [
+      17,
+      9,
+      0,
+      13,
+      0,
+      "STRING"
+    ],
+    [
+      18,
+      9,
+      2,
+      13,
+      1,
+      "TF_LEVELS"
     ]
   ],
   "groups": [
@@ -831,6 +902,19 @@
         516
       ],
       "color": "#8A8",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 5,
+      "title": "5 \u00b7 Keep the numbers",
+      "bounding": [
+        1578,
+        1278,
+        364,
+        256
+      ],
+      "color": "#3f789e",
       "font_size": 24,
       "flags": {}
     }

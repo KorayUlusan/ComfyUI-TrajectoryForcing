@@ -13,7 +13,8 @@ import numpy as np
 from comfy_api.latest import io
 from comfy_execution.graph_utils import ExecutionBlocker
 
-from . import render, tokens
+from . import render
+from . import tokens as token_ops
 from .locate import vue_nodes_enabled
 from .sockets import (
     CATEGORY_SELECT,
@@ -154,7 +155,7 @@ class TFRegionMap(io.ComfyNode):
     @classmethod
     def execute(cls, levels, level, cosine_threshold, size) -> io.NodeOutput:
         index = levels.clamp(level)
-        regions = tokens.build_region_map(levels.level(index), index, cosine_threshold)
+        regions = token_ops.build_region_map(levels.level(index), index, cosine_threshold)
         picture = render.draw_grid(render.render_regions(regions, size), regions.ids.shape)
         picture = render.draw_ticks(picture, regions.ids.shape)
         image = render.to_image(picture)
@@ -218,9 +219,9 @@ class TFTokensFromMask(io.ComfyNode):
         grid = levels.grid if levels is not None else (
             regions.ids.shape if regions is not None else DEFAULT_GRID)
         painted = render.from_mask(mask)
-        selection = tokens.mask_to_tokens(painted, grid, coverage)
+        selection = token_ops.mask_to_tokens(painted, grid, coverage)
         if regions is not None:
-            selection = tokens.snap_to_regions(selection, regions, region_overlap)
+            selection = token_ops.snap_to_regions(selection, regions, region_overlap)
         if selection.count == 0:
             # Painting workflows are two-pass by construction -- the first run
             # renders the canvas you paint on, so at that point there is nothing
@@ -255,13 +256,19 @@ class TFTokensFromCoords(io.ComfyNode):
             display_name="TF Tokens From Coords",
             category=CATEGORY_SELECT,
             description=(
-                "Type token coordinates directly: 'row,col' pairs, with 'row,col0:col1' for a run. "
-                "Reproducible in a way a brush stroke is not, which is what a written-up experiment needs."
+                "Pick tokens on a 16x16 grid: click cells, or drag to paint several. Typing works "
+                "too -- 'row,col' pairs, with 'row,col0:col1' for a run -- and the two stay in "
+                "step, because the clickable grid writes into the text field rather than replacing "
+                "it.\n\n"
+                "Either way the selection ends up as text you can paste into a writeup, which is "
+                "what a brush stroke cannot give you and what a written-up experiment needs."
             ),
             inputs=[
                 io.String.Input(
                     "coords", default="", multiline=True,
                     placeholder="7,7  7,8  8,7  8,8      or      7,6:9",
+                    tooltip="Click the grid above, or type here -- they are the same value. "
+                            "'7,6:9' means row 7, columns 6 through 9.",
                 ),
                 TFLevelsSocket.Input(
                     "levels", optional=True,
@@ -285,11 +292,11 @@ class TFTokensFromCoords(io.ComfyNode):
     def execute(cls, coords, levels=None, regions=None) -> io.NodeOutput:
         grid = levels.grid if levels is not None else (
             regions.ids.shape if regions is not None else DEFAULT_GRID)
-        selection = tokens.parse_coords(coords, grid)
+        selection = token_ops.parse_coords(coords, grid)
         if regions is not None:
             # Any overlap at all expands the region: a typed coordinate is a
             # deliberate pick of one token, not a rough stroke to be thresholded.
-            selection = tokens.snap_to_regions(selection, regions, 0.0)
+            selection = token_ops.snap_to_regions(selection, regions, 0.0)
         info = _describe(selection)
         return io.NodeOutput(selection, selection.count, info, ui=node_preview(text=info))
 
@@ -318,7 +325,7 @@ class TFTokensCombine(io.ComfyNode):
 
     @classmethod
     def execute(cls, a, operation, b=None) -> io.NodeOutput:
-        out = tokens.combine(a, b, operation)
+        out = token_ops.combine(a, b, operation)
         return io.NodeOutput(
             out, out.count, ui=node_preview(text=f"{out.count} tokens after {operation}"))
 
@@ -348,7 +355,9 @@ class TFTokensPreview(io.ComfyNode):
         canvas = render.fit_to_grid(blank, grid, size)
         canvas = render.draw_grid(render.draw_selection(canvas, selection), grid)
         canvas = render.draw_ticks(canvas, grid)
-        coords = " ".join(f"{r},{c}" for r, c in selection.coords)
+        # Same notation someone would have typed, runs and all, so it pastes
+        # straight back into TF Tokens From Coords.
+        coords = token_ops.format_coords(selection.mask)
         image = render.to_image(canvas)
         return io.NodeOutput(
             image, coords,

@@ -89,6 +89,21 @@ def _example(axis: str) -> str:
     return {SEED: "1,2,3,4", LEVEL: "0-3", STRENGTH: "0.25,0.5,0.75,1.0"}[axis]
 
 
+def _mismatch(problem: str, axis: str) -> str:
+    """Say the likely cause, not just the symptom.
+
+    `axis` and `values` are two widgets that have to agree, and changing the
+    dropdown leaves the text field behind -- so the first failure most people
+    meet is a seed list being read as strengths. "Strength 2.0 is outside 0..1"
+    is true and tells them nothing about which of the two to fix.
+    """
+    return (
+        f"{problem}. 'values' is being read as {axis} because that is what 'axis' is set to -- "
+        f"if you changed the axis, 'values' needs changing too. For {axis!r} try "
+        f"{_example(axis)!r}."
+    )
+
+
 def plan(
     axis: str,
     values: str,
@@ -118,19 +133,18 @@ def plan(
     for value in parsed:
         if axis == SEED:
             if value < 0:
-                raise ValueError(f"Seed {value} is negative.")
+                raise ValueError(_mismatch(f"Seed {value} is negative", axis))
             arms.append(Arm(value, pinned_level, int(value), float(strength)))
         elif axis == LEVEL:
             # Not clamped, unlike the level widgets elsewhere: clamping a sweep
             # axis turns "0-9" into four real arms and six silent duplicates of
             # level 3, and the table would not say so.
             if not 0 <= value < num_levels:
-                raise ValueError(
-                    f"Level {value} is outside this trajectory's 0..{num_levels - 1}."
-                )
+                raise ValueError(_mismatch(
+                    f"Level {value} is outside this trajectory's 0..{num_levels - 1}", axis))
             arms.append(Arm(value, int(value), int(seed), float(strength)))
         else:
             if not 0.0 <= value <= 1.0:
-                raise ValueError(f"Strength {value} is outside 0..1.")
+                raise ValueError(_mismatch(f"Strength {value} is outside 0..1", axis))
             arms.append(Arm(value, pinned_level, int(seed), float(value)))
     return arms

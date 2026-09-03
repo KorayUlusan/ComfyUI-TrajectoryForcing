@@ -159,10 +159,15 @@ the unedited original side by side.
 
 **The one thing to understand:** the edit happens on a **16×16 grid**. Every
 image is described by 256 "tokens" at each level, and a token is the smallest
-thing you can change. The coordinates in the *target region* box are `row,col`
-on that grid — `7,7` is the middle.
+thing you can change.
 
-Change `7,7` to something else and press Run. The preview labelled *what was
+The *target region* box has that grid drawn on it. **Click a cell** to choose
+where the edit lands, or drag across several. The `row,col` text underneath is
+the same selection written out — `7,7` is the middle — and you can type there
+instead if you prefer. Keeping it as text is what lets you write down exactly
+what you did.
+
+Click somewhere else on the grid and press Run. The preview labelled *what was
 selected* shows exactly which tokens your coordinates picked, so if a result
 surprises you, look there first.
 
@@ -174,9 +179,10 @@ Then try:
 - **strength.** `1.0` replaces outright; `0.5` blends.
 - **the two class ids** in the target and source boxes.
 
-When typing coordinates gets tedious, `workflows/03-feature-edit-painter.json`
-lets you paint the region with a brush instead. Read its yellow note first — it
-needs two runs, and that is deliberate.
+The grid is cell-by-cell. When you want a free-hand region instead — a shape
+that follows the picture rather than the grid —
+`workflows/03-feature-edit-painter.json` gives you a brush over the image
+itself. Read its yellow note first: it needs two runs, and that is deliberate.
 
 ---
 

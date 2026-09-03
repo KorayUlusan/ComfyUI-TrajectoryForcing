@@ -72,7 +72,34 @@ if [[ ! -e "$LINK" ]]; then
   echo "linked $LINK -> $EXT_DIR"
 fi
 
+# --- keep a log ------------------------------------------------------------
+# Without this an interactive session leaves no evidence: run_comfyui_slurm.sh streams to a
+# terminal nobody keeps, so "I pressed Run and nothing happened" has nothing to
+# read afterwards. ComfyUI's own `--verbose LEVEL FILE` writes the file itself,
+# which matters -- piping through `tee` would make stdout a pipe, and `srun
+# --pty` needs a real terminal on both ends or Ctrl-C stops reaching ComfyUI.
+LOG_DIR="${TF_LOG_DIR:-$EXT_DIR/outputs/comfyui_logs}"
+mkdir -p "$LOG_DIR"
+# Keep the most recent $KEEP_LOGS of a family, quietly and without ever failing.
+KEEP_LOGS=20
+prune_logs() {
+  local stem="$1" old
+  old=$(ls -1t "$LOG_DIR/$stem"-*.log 2>/dev/null | tail -n +$((KEEP_LOGS + 1)) || true)
+  [[ -n "$old" ]] && printf '%s\n' "$old" | xargs -r rm -f
+  return 0
+}
+
+SERVER_LOG="$LOG_DIR/comfyui-$(date +%Y%m%d-%H%M%S)-$$.log"
+# Keep the last 20; these are a few hundred KB each and nobody prunes by hand.
+# `|| true` is load-bearing: an empty glob makes `ls` exit 2, `2>/dev/null`
+# hides the message but not the status, and `set -o pipefail` + `set -e` then
+# kill the script before it prints anything. That is exactly what happened --
+# the logging added to diagnose a silent failure caused one.
+prune_logs "comfyui"
+
 echo "TrajectoryForcing repo: $TF_REPO"
 echo "ComfyUI on port $PORT; the first TF Load Pipeline warms up for 1-2 minutes."
+echo "server log: $SERVER_LOG"
 cd "$COMFY_DIR"
-exec "$VENV/bin/python" -u main.py --listen 0.0.0.0 --port "$PORT" "${COMFY_EXTRA[@]}" "${@:2}"
+exec "$VENV/bin/python" -u main.py --listen 0.0.0.0 --port "$PORT" \
+     --verbose INFO "$SERVER_LOG" "${COMFY_EXTRA[@]}" "${@:2}"

@@ -45,6 +45,12 @@ later run takes about a second.
 | *TF Generate* → `seed` | a different sample of the same class |
 | *TF Latent Preview* → `which` | one level instead of all four |
 
+Each strip is **one image with all four levels side by side**, not four images
+you page through — ComfyUI shows a multi-image output one frame at a time behind
+a small `1/4` button, which would leave you looking at level 0. Set
+`sheet_layout` (advanced) to *separate frames* if you want them individually,
+e.g. to save one file per level.
+
 The lower strip is the PCA view — the same four levels as raw tokens in false
 colour. It looks abstract, but it is what the edits in 02–04 operate on, and
 region boundaries are far easier to see there than in the decoded image.
@@ -73,7 +79,10 @@ time. A selection carries the level whose regions it was snapped to, and the
 edit nodes refuse it at any other — the token grid is the same size at every
 level, so otherwise the edit lands on the wrong region silently.
 
-**The coordinates.** Selections are `row,col` on the **16×16 token grid**.
+**The coordinates.** The node carries a clickable 16×16 grid — click a cell,
+or drag across several — and it writes the coordinates into the text field
+below it, so you never have to count cells. Typing still works and the two stay
+in step. Selections are `row,col` on the **16×16 token grid**.
 `7,7` is the middle. `6,6:9` means row 6, columns 6 through 9. The *target
 region* input has the region map wired into it, so a single coordinate expands
 to the whole region containing it; the *source tokens* input does not, so it
@@ -191,7 +200,7 @@ identical edit once per seed, and for each arm it *also* re-samples the
 the seed held fixed and cancelled out.
 
 **Groups:** load and generate both trajectories → choose the edit (held fixed
-across every arm) → sweep and tabulate → one arm in detail.
+across every arm) → sweep and tabulate → one arm in detail → keep the numbers.
 
 The table is in the node's own body:
 
@@ -216,8 +225,11 @@ Two numbers to read, and they mean different things:
 Below the `changed` threshold the node says so outright, rather than leaving you
 to compare two decimals.
 
-**The contact sheet** is the no-edit baseline first, then one frame per arm — so
-the visual comparison has a control in it too.
+**The contact sheet** is the no-edit baseline first, then one frame per arm,
+stitched into one image — so the visual comparison has a control in it, and the
+arms sit side by side at full size rather than in separate pictures. Long sweeps
+wrap into a grid. `sheet_layout` (advanced) → *separate frames* returns them as a
+batch instead, which is what *SaveImage* needs to write one file per arm.
 
 **Worth changing:**
 
@@ -228,6 +240,12 @@ the visual comparison has a control in it too.
 | `axis` → `strength` | with `values` `0.25,0.5,0.75,1.0`: where a blend stops being a blend. |
 | `output_arm` (advanced) | which arm leaves on the `levels` output, for the *TF Compare Levels* at the bottom right, or for saving. |
 | `arm_limit` (advanced) | the guard that refuses to start rather than let a mistyped `0-1000` hold the GPU for an hour. |
+
+**The table is saved, not just shown.** *TF Save Report* at the bottom appends
+it to `output/trajectory_forcing/sweep.md`, fenced so the columns survive, with
+the class, seed and full edit history above it. Successive runs accumulate in
+the one file, so a session's sweeps end up side by side and comparable. A number
+you cannot trace back to the run that made it is worth much less than it looks.
 
 **Cost:** two re-samples and one decode per arm. Four arms is a few seconds once
 the model is warm; forty is a coffee. Turn `decode` off (advanced) and the
@@ -259,6 +277,7 @@ Useful pieces not wired into any of the five:
 |---|---|
 | **TF Tokens Combine** | union/intersect/subtract several selections into one region |
 | **TF Save / Load Levels** | keep a trajectory across restarts, so two edits can be compared against the identical starting image |
+| **TF Save Report** | write a sweep or compare table to `output/trajectory_forcing/*.md` with the run that produced it — wired into workflow 05 |
 | **TF Levels Info** | the class, seed and full edit history of a trajectory |
 | **TF Level Canvas** → `view: decoded RGB` | paint against the picture instead of the false-colour tokens |
 

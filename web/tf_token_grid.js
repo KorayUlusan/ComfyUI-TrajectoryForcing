@@ -1,0 +1,253 @@
+// A clickable 16x16 token grid for TF Tokens From Coords.
+//
+// Coordinates are typed as `row,col` on the token grid, and typing them means
+// counting cells on a picture. Tick labels made a coordinate readable; this
+// makes one enterable.
+//
+// Two things about the shape of this, both deliberate:
+//
+//   * It is a *widget on the existing node*, not a node of its own. The grid
+//     writes into the node's own `coords` string, which stays the single source
+//     of truth -- so a selection is still a text value you can paste into a
+//     writeup, which is the entire reason TF Tokens From Coords exists.
+//
+//   * If this file fails to load, or ComfyUI changes an API it leans on, the
+//     `coords` text field is still there and typing still works. That is the
+//     whole bet: the extension gains a convenience, never a dependency. Nothing
+//     here may ever become the only way to do something.
+//
+// It is a DOM widget rather than a Vue component on purpose -- core's own
+// AUDIO_UI widget uses `addDOMWidget` unconditionally, so it renders under both
+// the classic and the Node 2.0 renderers. Painter's "Node 2.0 only" problem does
+// not apply here.
+//
+// `writeCoords` below must produce byte-identical output to
+// `tf_nodes/tokens.py::format_coords`, which is the tested reference: the grid
+// and the text field are two views of one value, and clicking must not silently
+// rewrite what someone typed into something merely equivalent.
+
+import { app } from "../../scripts/app.js";
+
+const NODE = "TFTokensFromCoords";
+const GRID = 16;        // every released checkpoint's token grid; see DEFAULT_GRID
+const TICK_EVERY = 4;   // matches render.TICK_EVERY, so this reads like the previews
+
+// Mirrors the _COORD regex in tokens.py: `r,c` with an optional `:c1` run.
+const COORD = /(\d+)\s*,\s*(\d+)(?:\s*:\s*(\d+))?/g;
+
+function readCoords(text, rows, cols) {
+  const mask = Array.from({ length: rows }, () => new Array(cols).fill(false));
+  for (const [, r, c0, c1] of (text || "").matchAll(COORD)) {
+    const row = +r;
+    if (row < 0 || row >= rows) continue;          // out of range: ignore here,
+    const lo = Math.min(+c0, c1 === undefined ? +c0 : +c1);   // the node still
+    const hi = Math.max(+c0, c1 === undefined ? +c0 : +c1);   // raises on it
+    for (let col = Math.max(0, lo); col <= Math.min(cols - 1, hi); col++) {
+      mask[row][col] = true;
+    }
+  }
+  return mask;
+}
+
+function writeCoords(mask) {
+  const parts = [];
+  for (let row = 0; row < mask.length; row++) {
+    for (let col = 0; col < mask[row].length; col++) {
+      if (!mask[row][col]) continue;
+      const start = col;
+      while (col + 1 < mask[row].length && mask[row][col + 1]) col++;
+      parts.push(col === start ? `${row},${start}` : `${row},${start}:${col}`);
+    }
+  }
+  return parts.join(" ");
+}
+
+function buildGrid(node, coordsWidget) {
+  const root = document.createElement("div");
+  root.className = "tf-token-grid";
+  Object.assign(root.style, {
+    display: "flex", flexDirection: "column", gap: "4px",
+    padding: "4px", boxSizing: "border-box", width: "100%",
+  });
+
+  const board = document.createElement("div");
+  Object.assign(board.style, {
+    display: "grid",
+    gridTemplateColumns: `repeat(${GRID}, 1fr)`,
+    gap: "1px",
+    background: "#2a3550",
+    border: "1px solid #3d4a6b",
+    aspectRatio: "1 / 1",
+    // Touch scrolling would otherwise steal the drag-to-paint gesture.
+    touchAction: "none",
+    userSelect: "none",
+  });
+
+  const status = document.createElement("div");
+  Object.assign(status.style, {
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+    font: "11px monospace", color: "#94a3b8",
+  });
+  const count = document.createElement("span");
+  const clear = document.createElement("button");
+  clear.textContent = "clear";
+  Object.assign(clear.style, {
+    font: "11px monospace", color: "#94a3b8", background: "transparent",
+    border: "1px solid #3d4a6b", borderRadius: "3px", cursor: "pointer",
+    padding: "1px 6px",
+  });
+  status.append(count, clear);
+
+  let mask = readCoords(coordsWidget.value, GRID, GRID);
+  const cells = [];
+
+  const paint = () => {
+    let selected = 0;
+    for (let row = 0; row < GRID; row++) {
+      for (let col = 0; col < GRID; col++) {
+        const on = mask[row][col];
+        if (on) selected++;
+        const cell = cells[row * GRID + col];
+        cell.style.background = on ? "#ff5050" : "#151d2e";
+        // Every fourth line, so the grid is countable the same way the previews
+        // are -- the tick labels there are on the same interval.
+        const rule = row % TICK_EVERY === 0 || col % TICK_EVERY === 0;
+        cell.style.boxShadow = on ? "inset 0 0 0 1px #ffb0b0"
+          : rule ? "inset 0 0 0 1px #33415c" : "none";
+      }
+    }
+    count.textContent = `${selected} token${selected === 1 ? "" : "s"}`;
+  };
+
+  const commit = () => {
+    const text = writeCoords(mask);
+    if (coordsWidget.value === text) return;
+    coordsWidget.value = text;
+    coordsWidget.callback?.(text);
+    node.onWidgetChanged?.(coordsWidget.name, text, undefined, coordsWidget);
+    app.graph?.setDirtyCanvas(true, false);
+  };
+
+  // Drag paints, and every cell it crosses is set to whatever the *first* cell
+  // became -- otherwise dragging over a mixed area toggles cells back and forth
+  // and the result depends on the exact path taken.
+  let dragging = false;
+  let dragTo = true;
+
+  for (let row = 0; row < GRID; row++) {
+    for (let col = 0; col < GRID; col++) {
+      const cell = document.createElement("div");
+      cell.title = `${row},${col}`;
+      cell.style.cursor = "pointer";
+      cells.push(cell);
+      board.append(cell);
+    }
+  }
+
+  // Which cell is under the pointer, by hit-testing rather than by listening on
+  // each cell. Per-cell `pointerenter` does not work here: the drag has to be
+  // pointer-captured to survive leaving the cell it started in, and a capture
+  // routes every later event to the capturing element, so siblings never see
+  // `pointerenter` at all. Touch is worse -- the browser captures to the
+  // pointerdown target implicitly, so it never worked there either. Capturing
+  // on the *board* and asking the document what is under the cursor fixes both:
+  // capture changes event routing, not hit-testing.
+  const cellAt = (x, y) => cells.indexOf(document.elementFromPoint(x, y));
+
+  const applyAt = (index) => {
+    if (index < 0) return;
+    const row = Math.floor(index / GRID);
+    const col = index % GRID;
+    if (mask[row][col] === dragTo) return;
+    mask[row][col] = dragTo;
+    paint();
+  };
+
+  board.addEventListener("pointerdown", (event) => {
+    const index = cellAt(event.clientX, event.clientY);
+    if (index < 0) return;
+    event.preventDefault();
+    event.stopPropagation();   // keep it off the canvas, or the node is dragged
+    dragging = true;
+    dragTo = !mask[Math.floor(index / GRID)][index % GRID];
+    applyAt(index);
+    board.setPointerCapture?.(event.pointerId);
+  });
+
+  board.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    event.preventDefault();
+    applyAt(cellAt(event.clientX, event.clientY));
+  });
+
+  const endDrag = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    if (event?.pointerId !== undefined) board.releasePointerCapture?.(event.pointerId);
+    commit();
+  };
+  board.addEventListener("pointerup", endDrag);
+  board.addEventListener("pointercancel", endDrag);
+  // A pointer released outside the board would otherwise leave `dragging` true
+  // and the next move would keep painting.
+  window.addEventListener("pointerup", endDrag);
+
+  clear.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    mask = readCoords("", GRID, GRID);
+    paint();
+    commit();
+  });
+
+  root.append(board, status);
+  paint();
+
+  // Typing into the text field is still first-class, so the grid follows it.
+  return { root, resync: () => { mask = readCoords(coordsWidget.value, GRID, GRID); paint(); } };
+}
+
+app.registerExtension({
+  name: "TrajectoryForcing.TokenGrid",
+  async beforeRegisterNodeDef(nodeType, nodeData) {
+    if (nodeData?.name !== NODE) return;
+    const onCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function () {
+      const result = onCreated?.apply(this, arguments);
+      try {
+        const coords = this.widgets?.find((w) => w.name === "coords");
+        if (!coords) return result;      // schema changed; leave typing alone
+
+        const { root, resync } = buildGrid(this, coords);
+        const widget = this.addDOMWidget("tf_token_grid", "div", root, {
+          hideOnZoom: false,
+          getMinHeight: () => 210,
+        });
+        // The coords string is the only thing worth saving; serialising the
+        // grid too would put the same value in the workflow file twice, and a
+        // stale copy is worse than none.
+        widget.serialize = false;
+        if (widget.options) widget.options.serialize = false;
+
+        const previous = coords.callback;
+        coords.callback = function (...args) {
+          const out = previous?.apply(this, args);
+          resync();
+          return out;
+        };
+        // Loading a saved workflow sets widget values without firing callbacks.
+        const onConfigure = this.onConfigure;
+        this.onConfigure = function (...args) {
+          const out = onConfigure?.apply(this, args);
+          resync();
+          return out;
+        };
+      } catch (error) {
+        // Never take the node down with the convenience. Typing must survive
+        // anything that goes wrong in here.
+        console.error("[TrajectoryForcing] token grid unavailable:", error);
+      }
+      return result;
+    };
+  },
+});

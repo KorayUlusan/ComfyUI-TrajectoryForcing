@@ -37,24 +37,11 @@ from .sockets import (
     level_input,
     node_preview,
     pipeline_input,
+    progress_bar,
     resolve_pipeline,
     seed_input,
+    sheet_layout_input,
 )
-
-
-def _progress(total: int):
-    """ComfyUI's progress bar when there is one, else nothing.
-
-    A sweep is the one node here that runs long enough for a still queue to look
-    like a hang. Imported lazily and guarded because `comfy.utils` is the
-    server's, not the API's, and the unit tests run without it.
-    """
-    try:
-        from comfy.utils import ProgressBar
-
-        return ProgressBar(total)
-    except Exception:  # pragma: no cover - depends on how ComfyUI was started
-        return None
 
 
 class TFSweep(io.ComfyNode):
@@ -97,8 +84,13 @@ class TFSweep(io.ComfyNode):
                 level_input(tooltip="l*, the level being edited. Pinned for every arm unless "
                                     "'level (l*)' is the axis, in which case 'values' supplies it."),
                 seed_input(),
+                # Advanced, unlike TF Feature Edit's: there the blend is the
+                # main knob, here 'values' is, and pinning strength anywhere but
+                # 1.0 while sweeping something else is a second-order case. Every
+                # other node in the set shows at most two widgets; this one broke
+                # that rhythm at five.
                 io.Float.Input(
-                    "strength", default=1.0, min=0.0, max=1.0, step=0.05,
+                    "strength", default=1.0, min=0.0, max=1.0, step=0.05, advanced=True,
                     tooltip="Pinned for every arm unless 'strength' is the axis. 1.0 replaces "
                             "outright, which is the paper's edit.",
                 ),
@@ -130,6 +122,7 @@ class TFSweep(io.ComfyNode):
                     tooltip="Which arm leaves on the 'levels' output, counting from 0, for "
                             "feeding TF Save Levels or TF Compare Levels.",
                 ),
+                sheet_layout_input("the baseline and every arm"),
                 io.Int.Input("size", default=384, min=128, max=1024, step=64, advanced=True),
                 TFLevelsSocket.Input(
                     "source_levels", optional=True,
@@ -158,8 +151,8 @@ class TFSweep(io.ComfyNode):
 
     @classmethod
     def execute(cls, levels, target_tokens, source_tokens, axis, values, level, seed,
-                strength, source_mode, baseline, decode, arm_limit, output_arm, size,
-                source_levels=None, pipeline=None) -> io.NodeOutput:
+                strength, source_mode, baseline, decode, arm_limit, output_arm,
+                sheet_layout, size, source_levels=None, pipeline=None) -> io.NodeOutput:
         pipe = resolve_pipeline(pipeline, levels, "TF Sweep Edit")
         arms = sweep.plan(
             axis, values, level=level, seed=seed, strength=strength,
@@ -182,7 +175,7 @@ class TFSweep(io.ComfyNode):
             target_tokens.check_level(levels.clamp(level), "target_tokens")
             source_tokens.check_level(source_stack.clamp(level), "source_tokens")
 
-        bar = _progress(len(arms) * (2 if baseline else 1))
+        bar = progress_bar(len(arms) * (2 if baseline else 1))
         baselines: dict[tuple[int, int], np.ndarray] = {}
         results, rows, finals = [], [], []
         for arm in arms:
@@ -224,7 +217,7 @@ class TFSweep(io.ComfyNode):
         )
         sheet = _sheet(
             pipe, levels, arms, results, baselines.get((arms[0].level, arms[0].seed)),
-            axis, decode, size,
+            axis, decode, size, sheet_layout,
         )
         out = replace(
             levels,
@@ -316,7 +309,7 @@ def _report(axis, arms, rows, spread, levels, target, source, source_levels,
     return "\n".join(lines)
 
 
-def _sheet(pipe, levels, arms, results, baseline_latents, axis, decode, size):
+def _sheet(pipe, levels, arms, results, baseline_latents, axis, decode, size, layout):
     """Baseline first, then one frame per arm, each captioned with its value."""
     def frame(latents) -> np.ndarray:
         if decode:
@@ -328,7 +321,6 @@ def _sheet(pipe, levels, arms, results, baseline_latents, axis, decode, size):
         frames.append((frame(baseline_latents), "no edit (baseline)"))
     frames += [(frame(latents), f"{axis} = {arm.value:g}")
                for arm, latents in zip(arms, results, strict=True)]
-    return render.to_image([
-        render.caption(render.fit_to_grid(picture, levels.grid, size), text)
-        for picture, text in frames
-    ])
+    tiles = [render.caption(render.fit_to_grid(picture, levels.grid, size), text)
+             for picture, text in frames]
+    return render.lay_out(tiles, layout)

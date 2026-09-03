@@ -22,6 +22,7 @@ from .sockets import (
     node_preview,
     pipeline_input,
     resolve_pipeline,
+    sheet_layout_input,
 )
 
 
@@ -50,6 +51,7 @@ class TFCompareLevels(io.ComfyNode):
                     tooltip="Also decode both final levels and show the pixel difference. "
                             "Costs two ViT-XL passes; the latent heatmap is free.",
                 ),
+                sheet_layout_input("the per-level heatmaps"),
                 pipeline_input(tooltip="Only needed when 'decode_difference' is on."),
             ],
             outputs=[
@@ -61,7 +63,8 @@ class TFCompareLevels(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, before, after, size, decode_difference, pipeline=None) -> io.NodeOutput:
+    def execute(cls, before, after, size, decode_difference, sheet_layout,
+                pipeline=None) -> io.NodeOutput:
         if before.latents.shape != after.latents.shape:
             raise ValueError(
                 f"Cannot compare {before.latents.shape} with {after.latents.shape} -- these are "
@@ -115,7 +118,7 @@ class TFCompareLevels(io.ComfyNode):
             )]
 
         report = "\n".join(lines)
-        heatmap = render.to_image(images)
+        heatmap = render.lay_out(images, sheet_layout)
         return io.NodeOutput(
             report, heatmap, total, round(peak, 6),
             ui=node_preview(image=heatmap, text=report),

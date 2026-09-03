@@ -220,6 +220,7 @@
       ],
       "which": "all levels",
       "label_levels": true,
+      "sheet_layout": "contact sheet",
       "level_override": -1
     },
     "_meta": {

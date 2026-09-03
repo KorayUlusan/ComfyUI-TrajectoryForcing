@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Run the ComfyUI UI on a GPU node and reach it at http://localhost:PORT here.
+# run_comfyui.sh, but on a Slurm GPU node: allocates one, runs ComfyUI there,
+# and gets you to it at http://localhost:PORT on this login node.
 #
-#   ./serve.sh [PORT]        (default 8188)
+#   ./run_comfyui_slurm.sh [PORT]        (default 8188)
+#
+# Use ./run_comfyui.sh instead if you are already on a machine with a GPU.
 #
 # The job streams to this terminal and Ctrl-C cancels it. That is what `srun`
 # gives you and `sbatch` does not: an sbatch job is detached from your shell, so
@@ -71,7 +74,27 @@ if ! port_free "$PORT"; then
   echo "Using $PORT instead."
 fi
 
-BRIDGE_LOG="${TMPDIR:-/tmp}/tf-comfyui-bridge-$$.log"
+# Both logs land in one directory so a report of "it did nothing" has one place
+# to look. Under /weka rather than /tmp, because /tmp is node-local: the bridge
+# runs here on the login node and ComfyUI runs on the compute node, and only a
+# shared filesystem puts the two halves of a session side by side.
+LOG_DIR="${TF_LOG_DIR:-$EXT_DIR/outputs/comfyui_logs}"
+mkdir -p "$LOG_DIR"
+# Keep the most recent $KEEP_LOGS of a family, quietly and without ever failing.
+KEEP_LOGS=20
+prune_logs() {
+  local stem="$1" old
+  old=$(ls -1t "$LOG_DIR/$stem"-*.log 2>/dev/null | tail -n +$((KEEP_LOGS + 1)) || true)
+  [[ -n "$old" ]] && printf '%s\n' "$old" | xargs -r rm -f
+  return 0
+}
+
+# `|| true` is load-bearing: an empty glob makes `ls` exit 2, `2>/dev/null`
+# hides the message but not the status, and `set -o pipefail` + `set -e` then
+# kill the script before it prints anything. That is exactly what happened --
+# the logging added to diagnose a silent failure caused one.
+prune_logs "bridge"
+BRIDGE_LOG="$LOG_DIR/bridge-$(date +%Y%m%d-%H%M%S)-$$.log"
 bridge_pid=""
 cleanup() {
   trap - TERM EXIT
@@ -91,7 +114,14 @@ cleanup() {
     echo "NOTE: the port bridge failed, so http://localhost:${PORT} was never live:"
     sed 's/^/      /' "$BRIDGE_LOG"
   fi
-  rm -f "$BRIDGE_LOG"
+  # Deliberately not deleted. This used to be `rm -f`, which meant a session
+  # where the UI misbehaved left nothing at all to look at afterwards -- the
+  # terminal stream is gone the moment the window is, and the server's own log
+  # lives on the compute node's view of $EXT_DIR. Say where both are.
+  echo
+  echo "Logs from this session, if anything looked wrong:"
+  echo "    bridge: $BRIDGE_LOG"
+  echo "    server: $(ls -1t "${TF_LOG_DIR:-$EXT_DIR/outputs/comfyui_logs}"/comfyui-*.log 2>/dev/null | head -1 || echo '<none written>')"
 
   # Slurm can take a few seconds to tear the allocation down, so a job still
   # listed right now is normal rather than a fault. Only say something is wrong

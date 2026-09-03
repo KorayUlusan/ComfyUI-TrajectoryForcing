@@ -120,3 +120,50 @@ class TestCaption:
     )
     def test_level_captions(self, index, levels, expected):
         assert render.level_caption(index, levels) == expected
+
+
+class TestContactSheet:
+    """One image rather than a batch, because a sweep's arms only mean
+    anything next to each other."""
+
+    def frames(self, n, h=20, w=30):
+        return [np.full((h, w, 3), 10 * (i + 1), dtype=np.uint8) for i in range(n)]
+
+    def test_a_short_sweep_is_one_row(self):
+        sheet = render.contact_sheet(self.frames(4))
+        assert sheet.shape[0] == 20
+        assert sheet.shape[1] == 4 * 30 + 3 * render.SHEET_GAP
+
+    def test_a_long_sweep_wraps_into_a_near_square_grid(self):
+        # Twelve frames in a row is 4600px wide at the real frame size, an
+        # aspect ratio no screen and no page wants.
+        sheet = render.contact_sheet(self.frames(12))
+        assert sheet.shape[0] == 3 * 20 + 2 * render.SHEET_GAP   # 4 cols x 3 rows
+        assert sheet.shape[1] == 4 * 30 + 3 * render.SHEET_GAP
+
+    def test_the_boundary_is_where_a_row_stops_being_readable(self):
+        assert render.contact_sheet(self.frames(render.SHEET_MAX_ROW)).shape[0] == 20
+        assert render.contact_sheet(self.frames(render.SHEET_MAX_ROW + 1)).shape[0] > 20
+
+    def test_frames_keep_their_reading_order(self):
+        sheet = render.contact_sheet(self.frames(3))
+        for i in range(3):
+            assert sheet[0, i * (30 + render.SHEET_GAP), 0] == 10 * (i + 1)
+
+    def test_a_part_row_is_filled_not_left_as_garbage(self):
+        # Seven frames is a 3x3 grid with two cells empty; uninitialised memory
+        # there would read as noise beside the last arm.
+        sheet = render.contact_sheet(self.frames(7))
+        assert np.array_equal(sheet[-1, -1], render.SHEET_BG)
+
+    def test_one_frame_is_returned_unchanged(self):
+        only = self.frames(1)[0]
+        assert np.array_equal(render.contact_sheet([only]), only)
+
+    def test_ragged_frames_are_refused_with_their_sizes(self):
+        with pytest.raises(ValueError, match="same size"):
+            render.contact_sheet(self.frames(2) + [np.zeros((5, 5, 3), dtype=np.uint8)])
+
+    def test_no_frames_at_all_is_refused(self):
+        with pytest.raises(ValueError, match="at least one frame"):
+            render.contact_sheet([])

@@ -126,24 +126,32 @@ class TFPipeline:
         with tf_scope():
             return [np.asarray(t, dtype=np.uint8) for t in self._pipe.pca_tiles(latents, palette=palette)]
 
-    def warm_up(self) -> None:
+    def warm_up(self, on_step=None) -> None:
         """Pay the JIT compile and the decoder build once, at load.
 
         Ported from `editing_env/app.py::_warmup`. Without it the first queued
         prompt sits for a minute or two with no progress, which in ComfyUI reads
         as a hung graph rather than as a compile.
+
+        `on_step(label)` is called as each stage finishes, so the node above can
+        drive a progress bar: moving the cost here only helps if something says
+        it is being paid.
         """
         started = time.perf_counter()
         levels = self.generate(0, 0)
         compiled = time.perf_counter()
+        if on_step:
+            on_step("sampler compiled")
         self.decode(levels, final_only=True)
+        if on_step:
+            on_step("decoder built")
         log.info(
             "TrajectoryForcing: warmup done -- sampler %.1fs, decoder %.1fs",
             compiled - started, time.perf_counter() - compiled,
         )
 
 
-def load_pipeline(config_name: str, checkpoint_name: str, warmup: bool) -> TFPipeline:
+def load_pipeline(config_name: str, checkpoint_name: str, warmup: bool, on_step=None) -> TFPipeline:
     """Get the pipeline for this (config, checkpoint), building it at most once.
 
     ComfyUI caches node outputs by input signature, but that cache is dropped on
@@ -157,6 +165,13 @@ def load_pipeline(config_name: str, checkpoint_name: str, warmup: bool) -> TFPip
         if pipe is None:
             pipe = TFPipeline(config_name, checkpoint_name)
             _CACHE[key] = pipe
+            if on_step:
+                on_step("checkpoint restored")
             if warmup:
-                pipe.warm_up()
+                pipe.warm_up(on_step)
+        elif on_step:
+            # Cached: nothing to wait for, so finish the bar rather than leaving
+            # it stopped a third of the way across, which reads as stuck.
+            for label in ("checkpoint restored", "sampler compiled", "decoder built"):
+                on_step(f"{label} (cached)")
         return pipe

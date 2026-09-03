@@ -24,6 +24,7 @@ tf_nodes/
 scripts/                workflow generator, smoke tests, measurement
 slurm/                  the GPU jobs those run under
 tests/                  pytest; no GPU needed
+web/                    the one piece of frontend code; see below
 ```
 
 The split that matters: `data.py`, `tokens.py` and `render.py` import neither
@@ -33,7 +34,7 @@ logic there and let `nodes_*.py` stay a thin schema-and-wiring layer.
 ## Tests
 
 ```bash
-pytest tests                      # 269 tests, no GPU, ~5 s
+pytest tests                      # 309 tests, no GPU, ~5 s
 sbatch slurm/gpu_smoke.sbatch     # the nodes against the real model
 sbatch slurm/server_smoke.sbatch  # the workflows through a real ComfyUI server
 sbatch slurm/measure_resources.sbatch   # the README's VRAM table
@@ -221,7 +222,7 @@ ComfyUI's Vue rendering (`Comfy.VueNodes.Enabled`, readable from
 
 `ncat --keep-open` forks a child per connection and each fork inherits the
 listening socket, so killing the leader leaves the port bound by orphans that
-outlive the session. `serve.sh` runs the bridge under `setsid` and kills the
+outlive the session. `run_comfyui_slurm.sh` runs the bridge under `setsid` and kills the
 **process group**. Anything else that forks per connection needs the same care.
 
 The same background process was also writing to the terminal while `srun --pty`
@@ -260,6 +261,64 @@ payload (the server has no class by that name), and group bounding boxes are
 computed from where their members actually ended up, because a hand-typed box
 drifts off its nodes and a group that no longer contains its nodes leaves them
 behind when dragged.
+
+## Three test layers, and what each one cannot see
+
+| | covers | blind to |
+|---|---|---|
+| `pytest tests` | node schemas, edit math, drawing, the launcher scripts against stubbed Slurm | anything needing a GPU or a browser |
+| `slurm/gpu_smoke.sbatch` | the nodes against the real model, with controls | ComfyUI's execution engine and its wire protocol |
+| `slurm/server_smoke.sbatch` | the workflows through a real server on the compute node's loopback | **the bridge** -- it never crosses it |
+| `scripts/bridge_smoke.py` | login node -> ncat bridge -> compute node, as a browser does it | the browser itself |
+
+That fourth one exists because two reports -- "no loading bar" and "the image
+generates but is not visible" -- are the same failure seen twice: both travel on
+the websocket, and if it drops the graph still runs, so the server log and
+/history look perfectly healthy while the browser is told nothing. Nothing
+tested that path. It now checks that `progress` events and the `executed`
+message carrying output images both arrive. Run it from the login node; it
+allocates a GPU, so it is not part of `pytest`.
+
+Nothing here drives a browser. When a report is about something only visible on
+screen, say which layer proved what rather than implying the whole path is
+covered.
+
+## The one piece of frontend code
+
+`web/tf_token_grid.js` puts a clickable 16x16 grid on *TF Tokens From Coords*.
+It is the only JavaScript here, and it exists under one condition, which any
+change to it has to keep:
+
+**It may never become the only way to do something.** The grid writes into the
+node's own `coords` string; it does not replace it. So if the file fails to
+load, ComfyUI changes an API it leans on, or a renderer does not support it, the
+text field is still there and typing still works. The whole `onNodeCreated` body
+is wrapped in a `try` for that reason -- a broken convenience must not take the
+node down with it.
+
+That condition is what makes the frontend code acceptable at all. `PLAN.md`
+records the pivot away from a bespoke region-picker widget, and the argument
+against it -- frontend code that has to track ComfyUI's frontend releases for a
+thesis artefact that must still run in a year -- has not gone away. It is
+survivable here only because failure costs a convenience rather than a feature.
+Compare *Painter*, which is a Vue component and simply unusable under the
+classic renderer: that needed a server-side detector and three paragraphs of
+docs. A DOM widget (`addDOMWidget`) renders under both, which is why this is one.
+
+**It is not covered by any test, and cannot be** -- there is no browser or JS
+runtime here. Two things narrow that gap:
+
+- `tokens.format_coords` is the tested reference implementation of the
+  coordinate notation, and `writeCoords` in the JS must produce byte-identical
+  output. `TestFormattingCoordsBack` pins it, including a round-trip property:
+  parse(format(mask)) == mask, and formatting twice is stable. Without that the
+  grid would silently rewrite what someone typed the moment it was touched.
+- `scripts/server_smoke.py` checks ComfyUI found `WEB_DIRECTORY`, lists the
+  script under `/extensions`, and serves the right file. That catches a wrong
+  path or a renamed directory; it cannot catch a behavioural bug.
+
+Everything past that needs someone to click it. Say so in a PR rather than
+implying it was verified.
 
 ## Docs
 

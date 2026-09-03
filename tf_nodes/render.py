@@ -210,6 +210,77 @@ def caption(image: np.ndarray, text: str) -> np.ndarray:
     return np.asarray(canvas, dtype=np.uint8)
 
 
+SHEET_GAP = 8
+SHEET_BG = np.array([17, 26, 43], dtype=np.uint8)   # the caption strip's colour
+# Past this many frames a single row stops being readable: twelve 384px arms in
+# a row is 4600x408, an aspect ratio no screen and no page wants.
+SHEET_MAX_ROW = 6
+
+
+def contact_sheet(frames, max_row: int = SHEET_MAX_ROW) -> np.ndarray:
+    """Lay equal-sized frames out as one image, in reading order.
+
+    A batch is the right shape for saving one file per frame, and the wrong one
+    for comparing: a sweep's arms mean nothing apart, and five frames sharing a
+    320px node body compare nothing. So they get stitched -- a row while a row
+    stays readable, a near-square grid past that.
+    """
+    frames = [np.asarray(f, dtype=np.uint8) for f in frames]
+    if not frames:
+        raise ValueError("A contact sheet needs at least one frame.")
+    if len(frames) == 1:
+        return frames[0]
+    h, w = frames[0].shape[:2]
+    if any(f.shape[:2] != (h, w) for f in frames):
+        raise ValueError(
+            "Contact-sheet frames must all be the same size; got "
+            f"{sorted({f.shape[:2] for f in frames})}."
+        )
+    cols = len(frames) if len(frames) <= max_row else int(np.ceil(np.sqrt(len(frames))))
+    rows = int(np.ceil(len(frames) / cols))
+    out = np.empty(
+        (rows * h + (rows - 1) * SHEET_GAP, cols * w + (cols - 1) * SHEET_GAP, 3),
+        dtype=np.uint8,
+    )
+    # Painted first, so a trailing part-row reads as empty space rather than
+    # whatever numpy had lying around.
+    out[:] = SHEET_BG
+    for i, frame in enumerate(frames):
+        row, col = divmod(i, cols)
+        y, x = row * (h + SHEET_GAP), col * (w + SHEET_GAP)
+        out[y:y + h, x:x + w] = frame
+    return out
+
+
+# ComfyUI draws a multi-image output **one frame at a time**, with a small
+# "1/4" pager button in the corner:
+#
+#     if (!(l > 1)) return;
+#     let C = (t.imageIndex ?? 0) + 1;
+#     if (drawButton(f - 40, p + n - 40, 30, `${C}/${l}`)) { ... }
+#
+# So a node that returns four levels as a batch shows *level 0* and a control
+# most people never spot. That is not a preview of a trajectory, it is a preview
+# of its first pass -- and it was reported as exactly that ("I get level 0, it
+# should give me all levels"). Stitching is therefore the default everywhere a
+# node emits several frames meant to be seen together.
+CONTACT_SHEET = "contact sheet"
+SEPARATE_FRAMES = "separate frames"
+SHEET_LAYOUTS = [CONTACT_SHEET, SEPARATE_FRAMES]
+
+
+def lay_out(frames, layout: str = CONTACT_SHEET):
+    """Frames as one stitched image, or as the batch ComfyUI pages through.
+
+    The batch is still worth having: it is the only shape `SaveImage` can write
+    as one file per frame.
+    """
+    frames = list(frames)
+    if layout == SEPARATE_FRAMES or len(frames) < 2:
+        return to_image(frames)
+    return to_image(contact_sheet(frames))
+
+
 LEVEL_NAMES = {0: "object/bg", 1: "parts", 2: "subparts"}
 
 

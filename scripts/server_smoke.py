@@ -20,10 +20,17 @@ Exit criteria, fixed before the run:
   3. edit      -- 02's edited output differs from its unedited control branch.
                   A workflow that runs but changes nothing would pass criterion
                   2 while the edit silently did nothing.
-  4. sweep     -- 05's report names every arm it was asked for and reports a
+  4. widget    -- the clickable token grid is registered and served. It is the
+                  only thing in this repo no test can exercise -- there is no
+                  browser here -- so this checks the half that is checkable:
+                  that ComfyUI found WEB_DIRECTORY, lists the script among its
+                  extensions, and serves the right file. A wrong path or a
+                  renamed directory fails here instead of silently leaving
+                  everyone typing coordinates.
+  5. sweep     -- 05's report names every arm it was asked for and reports a
                   spread, so the table reached the client rather than only the
                   images. A sweep that silently ran one arm would pass 2.
-  5. blocked   -- 03 (the Painter one) stops at TF Tokens From Mask with no
+  6. blocked   -- 03 (the Painter one) stops at TF Tokens From Mask with no
                   error dialog at all, on *two* consecutive runs -- the bug this
                   replaced raised on the first run and went silent on the
                   second, so one run cannot tell the two apart. It must still
@@ -66,7 +73,7 @@ EXPECTED_NODES = {
     "TFLevelsInfo", "TFLevelCanvas", "TFRegionMap", "TFTokensFromMask",
     "TFTokensFromCoords", "TFTokensCombine", "TFTokensPreview", "TFFeatureEdit",
     "TFShapeEdit", "TFResumeFromLevel", "TFSaveLevels", "TFLoadLevels",
-    "TFCompareLevels", "TFSweep",
+    "TFCompareLevels", "TFSweep", "TFSaveReport",
 }
 
 _results: list[tuple[str, bool, str]] = []
@@ -163,6 +170,11 @@ async def run_and_watch(base: str, name: str, client_id: str) -> list[dict]:
 def fetch_images(base: str, entry: dict, stem: str) -> int:
     """Pull every preview image the run produced, so the result can be eyeballed."""
     OUT.mkdir(parents=True, exist_ok=True)
+    # Clear this workflow's previous files first: frame counts change between
+    # runs -- four decoded levels became one stitched sheet -- and last run's
+    # leftovers sitting beside this run's read as part of it.
+    for stale in OUT.glob(f"{stem}-*.png"):
+        stale.unlink()
     saved = 0
     for node_id, output in entry.get("outputs", {}).items():
         for i, image in enumerate(output.get("images", [])):
@@ -202,6 +214,21 @@ def main() -> int:
             not missing and types_ok,
             f"{len(EXPECTED_NODES)} nodes registered, custom socket types published"
             if not missing else f"missing {sorted(missing)}",
+        )
+
+        # --- widget: registered and served -----------------------------------
+        served, body = "", ""
+        try:
+            listed = requests.get(f"{base}/extensions", timeout=30).json()
+            served = next((u for u in listed if u.endswith("/tf_token_grid.js")), "")
+            if served:
+                body = requests.get(f"{base}{served}", timeout=30).text
+        except Exception as error:  # noqa: BLE001 - reported, not raised
+            served = f"<{type(error).__name__}: {error}>"
+        check(
+            "the token grid widget is registered and served",
+            bool(served) and "TFTokensFromCoords" in body and "addDOMWidget" in body,
+            f"{served} ({len(body)} bytes)" if body else f"not served: {served or 'absent from /extensions'}",
         )
 
         # --- 2 & 3. execute --------------------------------------------------

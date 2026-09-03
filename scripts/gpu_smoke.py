@@ -22,7 +22,8 @@ Exit criteria, fixed here before the run, each printed as PASS/FAIL:
                   > l* differ from the unedited trajectory. This is the claim
                   the whole extension rests on; an edit that does not
                   propagate is the failure this test exists to catch.
-  7. sweep     -- a three-seed sweep of the *same* edit gives three arms; each
+  7. sweep     -- a three-seed sweep of the *same* edit gives three arms, laid
+                  out as one stitched contact sheet rather than a batch; each
                   arm's final level differs from its own no-edit baseline (so
                   the edit registers with the seed cancelled out), the spread
                   across arms is non-zero (so the seed matters at all), and the
@@ -68,6 +69,11 @@ def save(frames, stem: str) -> None:
     from PIL import Image
 
     OUT.mkdir(parents=True, exist_ok=True)
+    # Clear this stem's previous files first. Frame counts change between runs
+    # -- the sweep sheet went from four frames to one stitched image -- and
+    # leftovers from the last run sitting beside this one's read as part of it.
+    for stale in OUT.glob(f"{stem}-*.png"):
+        stale.unlink()
     for i, frame in enumerate(frames):
         Image.fromarray(np.asarray(frame, dtype=np.uint8)).save(OUT / f"{stem}-{i}.png")
 
@@ -121,8 +127,8 @@ def main() -> int:
     # --- 3. decode -----------------------------------------------------------
     t0 = time.perf_counter()
     images, warning = TFDecode.execute(
-        pipeline=pipeline, levels=levels, which="all levels", level_override=-1, label_levels=True
-    )
+        pipeline=pipeline, levels=levels, which="all levels", level_override=-1, label_levels=True,
+        sheet_layout="separate frames")
     frames = image_batch_to_uint8(images)
     save(frames, "01-original")
     distinct = len({f.tobytes() for f in frames})
@@ -131,8 +137,7 @@ def main() -> int:
 
     previews, = TFLatentPreview.execute(
         pipeline=pipeline, levels=levels, which="all levels", level_override=-1, size=512,
-        label_levels=True, palette_from=other,
-    )
+        label_levels=True, palette_from=other, sheet_layout="separate frames")
     save(image_batch_to_uint8(previews), "02-pca")
 
     # --- 4. regions ----------------------------------------------------------
@@ -189,8 +194,8 @@ def main() -> int:
     )
 
     edited_images, _ = TFDecode.execute(
-        pipeline=pipeline, levels=resumed, which="all levels", level_override=-1, label_levels=True
-    )
+        pipeline=pipeline, levels=resumed, which="all levels", level_override=-1, label_levels=True,
+        sheet_layout="separate frames")
     save(image_batch_to_uint8(edited_images), "04-edited")
 
     final_before = frames[-1]
@@ -210,7 +215,8 @@ def main() -> int:
         levels=levels, target_tokens=target, source_tokens=source,
         axis="seed", values=",".join(str(s) for s in sweep_seeds),
         level=EDIT_LEVEL, seed=SEED, strength=1.0, source_mode="region mean",
-        baseline=True, decode=True, arm_limit=12, output_arm=0, size=512,
+        baseline=True, decode=True, arm_limit=12, output_arm=0,
+        sheet_layout="contact sheet", size=512,
         source_levels=other, pipeline=pipeline,
     )
     print(report, flush=True)
@@ -220,15 +226,20 @@ def main() -> int:
     # and source as step 6, so it must land on exactly step 6's trajectory. A
     # loop that quietly differs -- a re-read source, a shifted seed, a resume
     # from the wrong level -- would still produce a plausible table.
+    # The shipped default is one stitched image, so that is what gets exercised:
+    # four 512px frames side by side, wider than tall.
+    stitched = sheet.shape[0] == 1 and sheet.shape[2] > sheet.shape[1]
     reproduces = np.array_equal(picked.latents, resumed.latents)
     # The node says so itself when an arm came out identical to its baseline,
     # rather than this script re-parsing the table's columns to find out.
     every_arm_moved = "changed nothing at all" not in report
     check(
         "sweep",
-        arms == len(sweep_seeds) and reproduces and spread > 0 and every_arm_moved,
+        arms == len(sweep_seeds) and reproduces and spread > 0 and every_arm_moved
+        and stitched,
         f"{arms} arms in {time.perf_counter() - t0:.1f}s, spread {spread:.4f}, "
         f"every arm moved the final level: {every_arm_moved}, "
+        f"sheet {tuple(sheet.shape[1:3])} stitched into one image: {stitched}, "
         f"arm 0 {'reproduces' if reproduces else 'DIVERGES FROM'} the explicit chain",
     )
 

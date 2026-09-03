@@ -80,7 +80,7 @@ where it would not be.
 ### Option B: a Slurm cluster
 
 ```bash
-./serve.sh                 # or ./serve.sh 8188
+./run_comfyui_slurm.sh                 # or ./run_comfyui_slurm.sh 8188
 ```
 
 Allocates a GPU node, streams the log to your terminal, and **Ctrl-C cancels the
@@ -89,7 +89,7 @@ the walltime expires. The trade is that the job dies with the terminal, which is
 right for an interactive session and wrong for anything else.
 
 ComfyUI binds the *compute* node, which your laptop cannot route to, so
-`serve.sh` also bridges the login node's `localhost:PORT` to it with `ncat`.
+`run_comfyui_slurm.sh` also bridges the login node's `localhost:PORT` to it with `ncat`.
 That avoids an SSH hop from login to compute, which needs a password unless your
 `~/.ssh/authorized_keys` contains your own `~/.ssh/id_*.pub` (`$HOME` is shared
 across nodes, so appending it once fixes that route too). From your laptop:
@@ -158,11 +158,18 @@ count, the selection, the comparison table. Nothing needs wiring to a preview
 node to be read, which matters because stock ComfyUI has no node that can
 display a string at all.
 
+**Several frames arrive as one image.** ComfyUI shows a multi-image output one
+frame at a time, behind a small `1/4` button that is easy to miss — so four
+decoded levels would look like level 0 alone. Any node that emits frames meant
+to be seen together stitches them into a single contact sheet instead: a row up
+to six, a near-square grid beyond. `sheet_layout` (advanced) switches back to a
+batch, which is the only shape *SaveImage* writes as one file per frame.
+
 ### Generating and looking
 
 | node | what it does |
 |---|---|
-| **TF Load Pipeline** | Loads the flow model and RAE decoder. Cached for the life of the process, so re-queueing never re-reads the checkpoint. `warmup` pays the XLA compile here instead of on your first prompt. |
+| **TF Load Pipeline** | Loads the flow model and RAE decoder, with a progress bar across restore → compile → decoder build, and a `ready in Ns` when it lands. Cached for the life of the process, so re-queueing never re-reads the checkpoint. Leave `warmup` on: turning it off does not save the 1–2 minutes, it moves them to your first TF Generate, which cannot show progress for a single opaque compile. |
 | **TF ImageNet Class** | Pick a class by name, get its id. |
 | **TF Generate** | Samples one full trajectory. Outputs every level, not just the last. |
 | **TF Decode Levels** | RAE-decodes all levels, the final one, or one you name — a single dropdown, not a mode plus a number. |
@@ -183,7 +190,7 @@ what was painted back down to tokens.
 | **TF Level Canvas** | One level as a 512px canvas: PCA latent or decoded RGB, with the token grid, region boundaries, and an existing selection drawn on. Feed it to Painter. |
 | **TF Region Map** | Clusters a level's tokens into connected regions by cosine similarity. These are the *R* in the paper's edits. The threshold sets granularity — 0.9 gives ~50 regions over 256 tokens at level 2. Its `level` output is worth wiring into the edit node, so the two cannot drift apart. |
 | **TF Tokens From Mask** | Painted mask → token selection. A token counts once enough of its footprint is painted, so a stroke clipping a corner does not overwrite that token's whole feature vector. Wire a region map in to snap a rough stroke to whole regions. |
-| **TF Tokens From Coords** | Type `row,col` pairs (`7,6:9` is a run). Reproducible in a way a brush stroke is not, which is what a written-up experiment needs. |
+| **TF Tokens From Coords** | **Click a 16×16 grid on the node**, or type `row,col` pairs (`7,6:9` is a run) — the grid writes into the text field, so both are the same value and either way the selection stays a text string you can paste into a writeup. That is what a brush stroke cannot give you. |
 | **TF Tokens Combine** | Union / intersection / difference / invert, to build a region up from several strokes. |
 | **TF Tokens Preview** | Draw a selection on its own, to check what a mask resolved to. |
 
@@ -201,6 +208,7 @@ what propagates it.
 | **TF Resume From Level** | Re-samples every level above *l\**, conditioned on the canvas sitting there. Levels below are untouched — sampling is Markov in the level index, so an edit only ever propagates upward. Left alone it follows the upstream edit, so *l\** cannot disagree with where the edit landed. |
 | **TF Sweep Edit** | The whole chain above, run once per value of **one** axis — a seed list, the levels, or a strength ramp — with everything else pinned. See below. |
 | **TF Save / Load Levels** | A trajectory to and from `output/trajectory_forcing/*.npz`, with its class, seed and edit history. A trajectory costs GPU time and is what every edit is measured against; reloading the exact one an earlier run used is what makes two edits comparable. |
+| **TF Save Report** | A sweep or comparison table to `output/trajectory_forcing/<name>.md`, fenced so the columns survive, and stamped with the class, seed and edit history that produced it when a trajectory is wired in. Appends by default, so a session's runs accumulate into one file. Without it the numbers exist only as text in a node body. |
 
 ### Sweeping
 
@@ -223,9 +231,12 @@ Two things make it an experiment tool rather than a batch button:
   place, so the *edit* decides the outcome and a single-seed result was
   trustworthy. Large means the seed does, and it was not.
 
-The node's body carries the table and the contact sheet (the no-edit baseline
-first, then one frame per arm); `levels` hands one arm on for saving or
-comparing. Cost is two re-samples and one decode per arm, and `arm_limit`
+The node's body carries the table and the contact sheet — the no-edit baseline
+first, then one frame per arm, stitched into **one** image so the arms can be
+compared at full size (a row up to six of them, a near-square grid beyond). Set
+`sheet_layout` to *separate frames* for the batch instead, which is what
+`SaveImage` needs to write one file per arm. `levels` hands one arm on for
+saving or comparing, and *TF Save Report* keeps the table. Cost is two re-samples and one decode per arm, and `arm_limit`
 (advanced) refuses to start rather than let a mistyped `0-1000` hold the GPU.
 
 Sweeping *l\** is the one axis that cannot hold everything else fixed: a
@@ -272,7 +283,7 @@ none of them is worth acting on:
 They are deliberately not suppressed: silencing third-party warnings by default
 is how a real one gets missed later.
 
-**`Address already in use` from `serve.sh`.** It clears its own leftovers at
+**`Address already in use` from `run_comfyui_slurm.sh`.** It clears its own leftovers at
 startup and steps to the next free port if something else holds it, so this
 should not recur — if it does, `ss -ltnp | grep 8188` names the process.
 
@@ -281,9 +292,25 @@ new node rendering. **Settings (gear, bottom left) → search "Node 2.0" →
 enable**, then reload the page. *TF Level Canvas* reads the setting and says so
 in its own body when it is off.
 
-**The first run takes minutes.** Loading the checkpoint plus an XLA compile.
-Once per ComfyUI start; later runs take about a second. `warmup` on *TF Load
-Pipeline* moves the cost to load time so it does not look like a hung prompt.
+**The first run takes minutes and looks like nothing is happening.** Loading the
+checkpoint plus an XLA compile plus building the RAE decoder — once per ComfyUI
+start; later runs take about a second. *TF Load Pipeline* now drives a progress
+bar across those three stages and reports how long it took, so a slow first run
+is visibly slow rather than indistinguishable from a hang. On a compute node
+with a cold JAX compilation cache it can take longer than you expect; give it
+two minutes before concluding anything is wrong.
+
+**Something misbehaved and you want to know why.** Every session writes two logs
+to `outputs/comfyui_logs/` (the last 20 of each are kept):
+
+| file | what |
+|---|---|
+| `comfyui-<timestamp>-<pid>.log` | the server's own log — every node that ran, every error |
+| `bridge-<timestamp>-<pid>.log` | `run_comfyui_slurm.sh`'s port bridge, if you used it |
+
+`run_comfyui_slurm.sh` prints both paths on exit. This matters because the terminal stream
+is gone the moment the window is: without these, "I pressed Run and nothing
+happened" leaves nothing at all to read afterwards.
 
 **`Could not find the TrajectoryForcing checkout`.** Set `TF_REPO`, or put the
 checkout next to this directory.

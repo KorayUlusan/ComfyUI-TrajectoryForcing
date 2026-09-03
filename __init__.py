@@ -21,6 +21,13 @@ from .tf_nodes.tf_import import configure_jax_env
 
 log = logging.getLogger(__name__)
 
+# Served at /extensions/<dir>/ and loaded by the browser. One file: the
+# clickable token grid on TF Tokens From Coords. It decorates that node's
+# `coords` text field and is never the only way to set a selection -- if it
+# fails to load, typing still works, which is the condition on this repo having
+# any frontend code at all.
+WEB_DIRECTORY = "./web"
+
 
 class TrajectoryForcingExtension(ComfyExtension):
     async def on_load(self) -> None:

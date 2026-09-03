@@ -118,6 +118,34 @@ def parse_coords(text: str, grid: tuple[int, int]) -> TokenSelection:
     return TokenSelection(mask=out, note=f"coords: {text.strip()}" if text else "empty")
 
 
+def format_coords(mask: np.ndarray) -> str:
+    """The inverse of `parse_coords`: a selection back to `"7,6:9 8,7"`.
+
+    Runs are collapsed, because that is the notation someone would have typed
+    and it is what ends up pasted into a writeup -- `7,6:9` rather than four
+    separate pairs.
+
+    This is the reference implementation for `web/tf_token_grid.js`, which has
+    to produce byte-identical output: the clickable grid and the text field are
+    two views of one value, and a round trip through the grid must not rewrite
+    what the user typed into something merely equivalent.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    parts: list[str] = []
+    for row in range(mask.shape[0]):
+        col = 0
+        while col < mask.shape[1]:
+            if not mask[row, col]:
+                col += 1
+                continue
+            start = col
+            while col + 1 < mask.shape[1] and mask[row, col + 1]:
+                col += 1
+            parts.append(f"{row},{start}" if col == start else f"{row},{start}:{col}")
+            col += 1
+    return " ".join(parts)
+
+
 def snap_to_regions(selection: TokenSelection, regions: RegionMap, min_overlap: float) -> TokenSelection:
     """Grow a selection to whole regions.
 

@@ -172,7 +172,7 @@
       ],
       "size": [
         320,
-        170
+        196
       ],
       "flags": {},
       "order": 4,
@@ -215,6 +215,7 @@
       "widgets_values": [
         "all levels",
         true,
+        "contact sheet",
         -1
       ]
     },
@@ -227,7 +228,7 @@
       ],
       "size": [
         320,
-        222
+        248
       ],
       "flags": {},
       "order": 5,
@@ -270,6 +271,7 @@
         "all levels",
         512,
         true,
+        "contact sheet",
         -1
       ]
     },

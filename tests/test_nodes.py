@@ -9,6 +9,7 @@ needs a GPU to find.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -194,8 +195,8 @@ class TestGenerateAndDecode:
     )
     def test_decode_frame_counts(self, node_classes, pipeline, levels, which, expected):
         images, _ = node(node_classes, "TFDecode").execute(
-            pipeline=pipeline, levels=levels, which=which, label_levels=False, level_override=-1
-        )
+            pipeline=pipeline, levels=levels, which=which, label_levels=False, level_override=-1,
+            sheet_layout="separate frames")
         assert isinstance(images, torch.Tensor)
         assert images.shape[0] == expected
         assert images.dtype == torch.float32
@@ -203,40 +204,38 @@ class TestGenerateAndDecode:
 
     def test_decode_captions_add_a_strip(self, node_classes, pipeline, levels):
         plain, _ = node(node_classes, "TFDecode").execute(
-            pipeline=pipeline, levels=levels, which="all levels", label_levels=False, level_override=-1
-        )
+            pipeline=pipeline, levels=levels, which="all levels", label_levels=False, level_override=-1,
+            sheet_layout="separate frames")
         labelled, _ = node(node_classes, "TFDecode").execute(
-            pipeline=pipeline, levels=levels, which="all levels", label_levels=True, level_override=-1
-        )
+            pipeline=pipeline, levels=levels, which="all levels", label_levels=True, level_override=-1,
+            sheet_layout="separate frames")
         assert labelled.shape[1] > plain.shape[1]
         assert labelled.shape[2] == plain.shape[2]
 
     def test_decode_warns_when_the_stack_is_stale(self, node_classes, pipeline, levels):
         edited = levels.with_level(1, levels.level(1), "edit")
         _, warning = node(node_classes, "TFDecode").execute(
-            pipeline=pipeline, levels=edited, which="all levels", label_levels=False, level_override=-1
-        )
+            pipeline=pipeline, levels=edited, which="all levels", label_levels=False, level_override=-1,
+            sheet_layout="separate frames")
         assert "stale" in warning
 
     def test_decode_of_a_level_below_the_edit_does_not_warn(self, node_classes, pipeline, levels):
         edited = levels.with_level(2, levels.level(2), "edit")
         _, warning = node(node_classes, "TFDecode").execute(
-            pipeline=pipeline, levels=edited, which="level 1", label_levels=False, level_override=-1
-        )
+            pipeline=pipeline, levels=edited, which="level 1", label_levels=False, level_override=-1,
+            sheet_layout="separate frames")
         assert warning == ""
 
     def test_latent_preview_fits_the_requested_size(self, node_classes, pipeline, levels):
         images, = node(node_classes, "TFLatentPreview").execute(
             pipeline=pipeline, levels=levels, which="all levels", size=256,
-            label_levels=False, level_override=-1, palette_from=None,
-        )
+            label_levels=False, level_override=-1, palette_from=None, sheet_layout="separate frames")
         assert images.shape == (LEVELS, 256, 256, 3)
 
     def test_palette_from_fits_jointly(self, node_classes, pipeline, levels):
         node(node_classes, "TFLatentPreview").execute(
             pipeline=pipeline, levels=levels, which="all levels", size=128,
-            label_levels=False, level_override=-1, palette_from=levels,
-        )
+            label_levels=False, level_override=-1, palette_from=levels, sheet_layout="separate frames")
         assert ("fit_palette", 2) in pipeline.calls
         assert ("pca_tiles", True) in pipeline.calls
 
@@ -623,7 +622,8 @@ class TestPipelineTravelsWithTheTrajectory:
         stack, = node(node_classes, "TFGenerate").execute(
             pipeline=pipeline, class_id=1, seed=1)
         images, _ = node(node_classes, "TFDecode").execute(
-            levels=stack, which="all levels", label_levels=False, level_override=-1)
+            levels=stack, which="all levels", label_levels=False, level_override=-1,
+            sheet_layout="separate frames")
         assert images.shape[0] == LEVELS
 
     def test_resume_passes_it_on(self, node_classes, pipeline):
@@ -639,7 +639,7 @@ class TestPipelineTravelsWithTheTrajectory:
             pipeline=pipeline, class_id=1, seed=1)
         node(node_classes, "TFDecode").execute(
             levels=stack, which="final level only", label_levels=False,
-            level_override=-1, pipeline=other)
+            level_override=-1, pipeline=other, sheet_layout="separate frames")
         assert any(c[0] == "generate" for c in pipeline.calls)
         assert not other.calls, "decode uses no recorded call, but the override must be the one used"
 
@@ -648,7 +648,8 @@ class TestPipelineTravelsWithTheTrajectory:
         assert levels.pipeline is None
         with pytest.raises(ValueError, match="Wire TF Load Pipeline"):
             node(node_classes, "TFDecode").execute(
-                levels=levels, which="all levels", label_levels=False, level_override=-1)
+                levels=levels, which="all levels", label_levels=False, level_override=-1,
+                sheet_layout="separate frames")
 
 
 class TestLevelAgreement:
@@ -761,7 +762,7 @@ class TestCompareLevels:
     def test_identical_trajectories_report_no_change(self, node_classes, pipeline):
         stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=1, seed=1)
         report, images, changed, peak = node(node_classes, "TFCompareLevels").execute(
-            before=stack, after=stack, size=256, decode_difference=False)
+            before=stack, after=stack, size=256, decode_difference=False, sheet_layout="separate frames")
         assert changed == 0
         assert peak == 0.0
         assert "Nothing changed" in report
@@ -770,7 +771,7 @@ class TestCompareLevels:
     def test_it_localises_the_edit_to_the_right_levels(self, node_classes, pipeline):
         before, after = self._edit_and_resume(node_classes, pipeline, level=2)
         report, _, changed, peak = node(node_classes, "TFCompareLevels").execute(
-            before=before, after=after, size=256, decode_difference=False)
+            before=before, after=after, size=256, decode_difference=False, sheet_layout="separate frames")
         assert changed > 0 and peak > 0
         # the stub re-samples only above the edited level, so 0..1 must be clean
         assert "First level that differs: 2." in report
@@ -779,16 +780,16 @@ class TestCompareLevels:
     def test_the_report_has_a_row_per_level(self, node_classes, pipeline):
         before, after = self._edit_and_resume(node_classes, pipeline)
         report, _, _, _ = node(node_classes, "TFCompareLevels").execute(
-            before=before, after=after, size=256, decode_difference=False)
+            before=before, after=after, size=256, decode_difference=False, sheet_layout="separate frames")
         for level in range(LEVELS):
             assert f"Level {level}" in report
 
     def test_decoding_the_difference_adds_a_frame(self, node_classes, pipeline):
         before, after = self._edit_and_resume(node_classes, pipeline)
         plain, _, _, _ = node(node_classes, "TFCompareLevels").execute(
-            before=before, after=after, size=256, decode_difference=False)
+            before=before, after=after, size=256, decode_difference=False, sheet_layout="separate frames")
         report, images, _, _ = node(node_classes, "TFCompareLevels").execute(
-            before=before, after=after, size=256, decode_difference=True)
+            before=before, after=after, size=256, decode_difference=True, sheet_layout="separate frames")
         assert images.shape[0] == LEVELS + 1
         assert "mean |delta|" in report and "mean |delta|" not in plain
 
@@ -797,7 +798,7 @@ class TestCompareLevels:
         # and a decoded difference is a different size from a heatmap tile.
         before, after = self._edit_and_resume(node_classes, pipeline)
         _, images, _, _ = node(node_classes, "TFCompareLevels").execute(
-            before=before, after=after, size=640, decode_difference=True)
+            before=before, after=after, size=640, decode_difference=True, sheet_layout="separate frames")
         assert images.shape[0] == LEVELS + 1
 
     def test_mismatched_trajectories_are_refused(self, node_classes, pipeline):
@@ -807,7 +808,7 @@ class TestCompareLevels:
         odd = LevelStack(latents=np.zeros((2, 4, 4, 3), np.float32), class_id=1, seed=1)
         with pytest.raises(ValueError, match="not two versions of the same trajectory"):
             node(node_classes, "TFCompareLevels").execute(
-                before=stack, after=odd, size=256, decode_difference=False)
+                before=stack, after=odd, size=256, decode_difference=False, sheet_layout="separate frames")
 
     def test_a_zero_token_does_not_produce_a_nan(self, node_classes, pipeline):
         # A collapsed token has no direction, so cosine is 0/0. That is a result
@@ -820,7 +821,7 @@ class TestCompareLevels:
         before = LevelStack(latents=a, class_id=1, seed=1, pipeline=pipeline)
         after = LevelStack(latents=b, class_id=1, seed=1, pipeline=pipeline)
         report, _, changed, peak = node(node_classes, "TFCompareLevels").execute(
-            before=before, after=after, size=256, decode_difference=False)
+            before=before, after=after, size=256, decode_difference=False, sheet_layout="separate frames")
         assert changed == 1
         assert np.isfinite(peak) and peak == 1.0
         assert "nan" not in report.lower()
@@ -836,7 +837,8 @@ class TestSweepEdit:
     DEFAULTS = dict(
         axis="seed", values="1,2,3", level=2, seed=7, strength=1.0,
         source_mode="region mean", baseline=True, decode=True,
-        arm_limit=12, output_arm=0, size=128, source_levels=None,
+        arm_limit=12, output_arm=0, sheet_layout="contact sheet", size=128,
+        source_levels=None,
     )
 
     @pytest.fixture
@@ -865,7 +867,8 @@ class TestSweepEdit:
 
     # ----- the loop itself -----
     def test_one_arm_per_value(self, node_classes, levels):
-        report, sheet, _, arms, _ = self._run(node_classes, levels, values="1,2,3")
+        report, sheet, _, arms, _ = self._run(
+            node_classes, levels, values="1,2,3", sheet_layout="separate frames")
         assert arms == 3
         assert sheet.shape[0] == 4, "the no-edit baseline, then one frame per arm"
         for seed in (1, 2, 3):
@@ -955,23 +958,46 @@ class TestSweepEdit:
             self, node_classes, levels):
         _, _, out, _, _ = self._run(node_classes, levels, values="1,2")
         report, _, _, _ = node(node_classes, "TFCompareLevels").execute(
-            before=levels, after=out, size=128, decode_difference=False)
+            before=levels, after=out, size=128, decode_difference=False, sheet_layout="separate frames")
         assert "tokens changed" in report
 
     # ----- the contact sheet -----
     def test_the_sheet_frames_are_all_stackable(self, node_classes, levels):
         # to_image stacks them into one batch and numpy will not stack ragged
-        # frames; a decoded arm and a PCA tile are different sizes.
-        _, decoded, _, _, _ = self._run(node_classes, levels, values="1,2", decode=True)
-        _, latent, _, _, _ = self._run(node_classes, levels, values="1,2", decode=False)
+        # frames; a decoded arm and a PCA tile are different sizes. The same
+        # equality is what lets them be stitched into one sheet at all.
+        kw = dict(sheet_layout="separate frames")
+        _, decoded, _, _, _ = self._run(node_classes, levels, values="1,2", decode=True, **kw)
+        _, latent, _, _, _ = self._run(node_classes, levels, values="1,2", decode=False, **kw)
         assert decoded.shape[0] == latent.shape[0] == 3
+
+    def test_the_arms_are_stitched_side_by_side_by_default(self, node_classes, levels):
+        # Comparison is the whole reason the node exists, and a batch puts the
+        # arms in separate pictures -- five frames sharing a 320px node body
+        # compare nothing, and SaveImage writes five unrelated files.
+        _, sheet, _, _, _ = self._run(node_classes, levels, values="1,2")
+        _, frames, _, _, _ = self._run(node_classes, levels, values="1,2",
+                                       sheet_layout="separate frames")
+        assert sheet.shape[0] == 1, "one image, not a batch"
+        assert frames.shape[0] == 3
+        # baseline + two arms in a row, so three frames wide and one tall
+        assert sheet.shape[2] > sheet.shape[1]
+        assert sheet.shape[2] >= 3 * frames.shape[2]
+
+    def test_a_long_sweep_wraps_instead_of_becoming_a_strip(self, node_classes, levels):
+        # Twelve arms in one row is 4600px wide at the default size, an aspect
+        # ratio nothing displays usefully.
+        _, wide, _, _, _ = self._run(node_classes, levels, values="1-3")
+        _, grid, _, _, _ = self._run(node_classes, levels, values="1-9")
+        assert wide.shape[1] < grid.shape[1], "the long one gained rows"
+        assert grid.shape[2] < 9 * 128, "and stopped growing sideways"
 
     def test_it_shows_its_own_table_and_sheet(self, node_classes, levels):
         out = self._run(node_classes, levels, values="1,2")
         assert "spread across arms" in ui_text(out)
-        # The whole sheet, not a thumbnail of it: the arms are only worth
-        # anything side by side, and this node's body is where they land.
-        assert len(ui_images(out)) == 3
+        # One stitched sheet in the node's own body: the arms are only worth
+        # anything side by side, and that is where they land.
+        assert len(ui_images(out)) == 1
 
     # ----- guards -----
     def test_a_mistyped_range_is_refused_before_any_gpu_work(
@@ -1044,6 +1070,75 @@ class TestSweepEdit:
         assert "2 target tokens" in report and "1 source tokens" in report
 
 
+class TestSaveReport:
+    """The numbers have to be able to leave the graph.
+
+    TF Sweep Edit and TF Compare Levels produce exactly what a results table
+    wants, and before this node it existed only as text in a node body.
+    """
+
+    @pytest.fixture
+    def output_dir(self, tmp_path, monkeypatch):
+        import tf_nodes.nodes_io as nodes_io
+
+        monkeypatch.setattr(nodes_io, "_output_dir", lambda: tmp_path)
+        return tmp_path
+
+    def test_it_writes_the_report_verbatim(self, node_classes, output_dir):
+        table = "seed   changed\n592    27 / 256"
+        path, = node(node_classes, "TFSaveReport").execute(
+            text=table, name="sweep", levels=None, append=True)
+        written = (output_dir / "sweep.md").read_text()
+        assert table in written
+        assert path.endswith("sweep.md")
+
+    def test_the_table_is_fenced_so_markdown_cannot_reflow_it(self, node_classes, output_dir):
+        # These are aligned columns; unfenced, markdown runs them into one
+        # paragraph, which destroys the only thing the file is for.
+        node(node_classes, "TFSaveReport").execute(
+            text="a   b\n1   2", name="r", levels=None, append=True)
+        assert (output_dir / "r.md").read_text().count("```") == 2
+
+    def test_provenance_is_written_when_a_trajectory_is_wired(
+            self, node_classes, output_dir, levels):
+        node(node_classes, "TFSaveReport").execute(
+            text="table", name="r", levels=levels, append=True)
+        written = (output_dir / "r.md").read_text()
+        assert "class: 213" in written and "Irish setter" in written
+        assert "seed: 1" in written
+        assert "stub" in written, "the edit history is what makes a number traceable"
+
+    def test_appending_accumulates_runs_in_one_file(self, node_classes, output_dir):
+        for value in ("first", "second"):
+            node(node_classes, "TFSaveReport").execute(
+                text=value, name="r", levels=None, append=True)
+        written = (output_dir / "r.md").read_text()
+        assert "first" in written and "second" in written
+        assert written.count("```") == 4
+        assert len(list(output_dir.glob("*.md"))) == 1
+
+    def test_not_appending_numbers_the_files_instead(self, node_classes, output_dir):
+        for _ in range(3):
+            node(node_classes, "TFSaveReport").execute(
+                text="x", name="r", levels=None, append=False)
+        assert sorted(p.name for p in output_dir.glob("*.md")) == [
+            "r-001.md", "r-002.md", "r.md"]
+
+    def test_an_empty_report_says_what_to_wire(self, node_classes, output_dir):
+        with pytest.raises(ValueError, match="Wire TF Sweep Edit"):
+            node(node_classes, "TFSaveReport").execute(
+                text="   ", name="r", levels=None, append=True)
+
+    def test_the_name_cannot_escape_the_output_directory(self, node_classes, output_dir):
+        path, = node(node_classes, "TFSaveReport").execute(
+            text="x", name="../../etc/passwd", levels=None, append=True)
+        assert Path(path).parent == output_dir
+
+    def test_it_is_an_output_node_so_it_runs_with_nothing_downstream(self, node_classes):
+        # Its whole purpose is the side effect; without this ComfyUI prunes it.
+        assert node(node_classes, "TFSaveReport").define_schema().is_output_node
+
+
 class TestOneWidgetInsteadOfTwo:
     """`which` + `level` and `follow_edit` + `level` were both a mode plus a
     number the mode silently ignored. Each is now a single control that always
@@ -1052,7 +1147,7 @@ class TestOneWidgetInsteadOfTwo:
     def test_the_dropdown_names_the_level_directly(self, node_classes, pipeline, levels):
         images, _ = node(node_classes, "TFDecode").execute(
             pipeline=pipeline, levels=levels, which="level 1",
-            label_levels=False, level_override=-1)
+            label_levels=False, level_override=-1, sheet_layout="separate frames")
         assert images.shape[0] == 1
 
     def test_the_dropdown_covers_every_shipped_level(self, node_classes):
@@ -1069,7 +1164,7 @@ class TestOneWidgetInsteadOfTwo:
         # ignorable widget under a new name.
         images, _ = node(node_classes, "TFDecode").execute(
             pipeline=pipeline, levels=levels, which="all levels",
-            label_levels=False, level_override=3)
+            label_levels=False, level_override=3, sheet_layout="separate frames")
         assert images.shape[0] == 1
 
     def test_resume_follows_the_edit_when_left_alone(self, node_classes, pipeline, levels):
@@ -1144,7 +1239,7 @@ class TestEveryNodeShowsItsOwnResult:
         "TFLatentPreview", "TFRegionMap", "TFTokensFromMask", "TFTokensFromCoords",
         "TFTokensCombine", "TFTokensPreview", "TFFeatureEdit", "TFShapeEdit",
         "TFResumeFromLevel", "TFCompareLevels", "TFSweep", "TFSaveLevels",
-        "TFLoadLevels",
+        "TFSaveReport", "TFLoadLevels",
     }
 
     def test_they_all_declare_a_string_output_or_show_text(self, node_classes):
@@ -1179,7 +1274,7 @@ class TestEveryNodeShowsItsOwnResult:
     def test_compare_shows_both_the_table_and_the_heatmap(self, node_classes, pipeline):
         stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=1, seed=1)
         out = node(node_classes, "TFCompareLevels").execute(
-            before=stack, after=stack, size=256, decode_difference=False)
+            before=stack, after=stack, size=256, decode_difference=False, sheet_layout="separate frames")
         assert "tokens changed" in ui_text(out)
         assert len(ui_images(out)) == LEVELS
 
@@ -1291,3 +1386,107 @@ class TestTheAutoConvention:
             source_mode="region mean", strength=1.0, source_level=2, source_levels=None)
         assert "auto: same as the edit" in auto
         assert "auto" not in explicit
+
+
+class TestTheSmokeScriptsCallNodesCorrectly:
+    """`scripts/gpu_smoke.py` calls node `execute` methods by hand.
+
+    Nothing else checks those call sites, so a renamed or added input leaves the
+    script raising TypeError -- and only once it reaches a GPU, minutes into a
+    queued job. That has now happened twice in this repo: once when `which` +
+    `level` were merged, and once when the sweep gained `sheet_layout`. This
+    reads the call sites out of the source and checks them against the live
+    schemas, in the five seconds the rest of the suite takes.
+    """
+
+    def _calls(self, source: str):
+        """Every `SomeNode.execute(...)` in the file, as (node class name, kwargs)."""
+        import ast
+
+        for node_ in ast.walk(ast.parse(source)):
+            if not isinstance(node_, ast.Call):
+                continue
+            func = node_.func
+            if (isinstance(func, ast.Attribute) and func.attr == "execute"
+                    and isinstance(func.value, ast.Name)):
+                yield func.value.id, {kw.arg for kw in node_.keywords if kw.arg}
+
+    def test_every_execute_call_matches_its_schema(self, node_classes):
+        from pathlib import Path
+
+        script = Path(__file__).resolve().parent.parent / "scripts" / "gpu_smoke.py"
+        by_name = {c.__name__: c for c in node_classes}
+        checked = 0
+        for name, passed in self._calls(script.read_text()):
+            cls = by_name.get(name)
+            if cls is None:
+                continue
+            schema = cls.define_schema()
+            declared = {i.id for i in schema.inputs}
+            required = {i.id for i in schema.inputs if not i.optional}
+            assert passed <= declared, (
+                f"gpu_smoke.py passes {sorted(passed - declared)} to {name}, which has no such input")
+            assert required <= passed, (
+                f"gpu_smoke.py is missing {sorted(required - passed)} for {name}")
+            checked += 1
+        assert checked >= 6, f"only matched {checked} call sites; the parser has drifted"
+
+
+class TestSeveralFramesArriveAsOneImage:
+    """ComfyUI pages a multi-image output one frame at a time.
+
+    Its renderer draws a small "1/4" button and shows `imageIndex` only:
+
+        if (!(l > 1)) return;
+        let C = (t.imageIndex ?? 0) + 1;
+        if (drawButton(f - 40, p + n - 40, 30, `${C}/${l}`)) { ... }
+
+    So a node returning four levels as a batch shows *level 0* and a control
+    most people never spot -- reported as "I run workflow 1 and get level 0, it
+    should give me all levels". Anything meant to be seen together is therefore
+    stitched by default, and the batch stays behind `sheet_layout` because it is
+    the only shape SaveImage writes as one file per frame.
+    """
+
+    def test_decoding_all_levels_gives_one_image_not_a_batch(self, node_classes, pipeline, levels):
+        images, _ = node(node_classes, "TFDecode").execute(
+            pipeline=pipeline, levels=levels, which="all levels",
+            label_levels=True, level_override=-1, sheet_layout="contact sheet")
+        assert images.shape[0] == 1, "four levels must not arrive as four pages"
+        assert images.shape[2] > images.shape[1], "laid out as a row"
+
+    def test_the_batch_is_still_available_for_saving(self, node_classes, pipeline, levels):
+        images, _ = node(node_classes, "TFDecode").execute(
+            pipeline=pipeline, levels=levels, which="all levels",
+            label_levels=True, level_override=-1, sheet_layout="separate frames")
+        assert images.shape[0] == LEVELS
+
+    def test_a_single_level_is_unaffected_either_way(self, node_classes, pipeline, levels):
+        for layout in ("contact sheet", "separate frames"):
+            images, _ = node(node_classes, "TFDecode").execute(
+                pipeline=pipeline, levels=levels, which="level 1",
+                label_levels=False, level_override=-1, sheet_layout=layout)
+            assert images.shape[0] == 1
+
+    def test_the_latent_preview_stitches_too(self, node_classes, pipeline, levels):
+        images, = node(node_classes, "TFLatentPreview").execute(
+            pipeline=pipeline, levels=levels, which="all levels", size=128,
+            label_levels=True, level_override=-1, sheet_layout="contact sheet")
+        assert images.shape[0] == 1
+
+    def test_compare_stitches_its_per_level_heatmaps(self, node_classes, pipeline):
+        stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=1, seed=1)
+        _, heatmap, _, _ = node(node_classes, "TFCompareLevels").execute(
+            before=stack, after=stack, size=256, decode_difference=False,
+            sheet_layout="contact sheet")
+        assert heatmap.shape[0] == 1
+
+    def test_every_multi_frame_node_offers_the_choice(self, node_classes):
+        # If a node can emit several frames meant to be compared, it must not be
+        # able to hand them over as a batch by accident.
+        for node_id in ("TFDecode", "TFLatentPreview", "TFCompareLevels", "TFSweep"):
+            schema = node(node_classes, node_id).define_schema()
+            widget = next((i for i in schema.inputs if i.id == "sheet_layout"), None)
+            assert widget is not None, f"{node_id} has no sheet_layout"
+            assert widget.options[0] == "contact sheet", f"{node_id} defaults to a batch"
+            assert widget.advanced, f"{node_id} shows sheet_layout by default"

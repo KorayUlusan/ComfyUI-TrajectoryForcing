@@ -11,7 +11,7 @@ from __future__ import annotations
 def nodes() -> list[type]:
     from .nodes_compare import TFCompareLevels
     from .nodes_edit import TFFeatureEdit, TFResumeFromLevel, TFShapeEdit
-    from .nodes_io import TFLoadLevels, TFSaveLevels
+    from .nodes_io import TFLoadLevels, TFSaveLevels, TFSaveReport
     from .nodes_pipeline import (
         TFDecode,
         TFGenerate,
@@ -49,5 +49,6 @@ def nodes() -> list[type]:
         TFSweep,
         TFCompareLevels,
         TFSaveLevels,
+        TFSaveReport,
         TFLoadLevels,
     ]
