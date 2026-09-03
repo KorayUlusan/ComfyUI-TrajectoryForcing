@@ -28,6 +28,7 @@ def nodes() -> list[type]:
         TFTokensFromMask,
         TFTokensPreview,
     )
+    from .nodes_sweep import TFSweep
 
     return [
         TFLoadPipeline,
@@ -45,6 +46,7 @@ def nodes() -> list[type]:
         TFFeatureEdit,
         TFShapeEdit,
         TFResumeFromLevel,
+        TFSweep,
         TFCompareLevels,
         TFSaveLevels,
         TFLoadLevels,

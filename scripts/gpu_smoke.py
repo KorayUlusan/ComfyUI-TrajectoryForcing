@@ -22,7 +22,15 @@ Exit criteria, fixed here before the run, each printed as PASS/FAIL:
                   > l* differ from the unedited trajectory. This is the claim
                   the whole extension rests on; an edit that does not
                   propagate is the failure this test exists to catch.
-  7. control   -- re-generating with the original class and seed reproduces
+  7. sweep     -- a three-seed sweep of the *same* edit gives three arms; each
+                  arm's final level differs from its own no-edit baseline (so
+                  the edit registers with the seed cancelled out), the spread
+                  across arms is non-zero (so the seed matters at all), and the
+                  arm whose seed matches step 6 reproduces step 6's trajectory
+                  bit-for-bit. That last part is the sweep's own control: if the
+                  loop is not doing exactly what the explicit edit-and-resume
+                  chain does, its table describes some other operation.
+  8. control   -- re-generating with the original class and seed reproduces
                   step 2's trajectory exactly. If this fails the run is void:
                   sampling is not deterministic and nothing above can be
                   attributed to the edit.
@@ -82,6 +90,7 @@ def main() -> int:
     from tf_nodes.nodes_edit import TFFeatureEdit, TFResumeFromLevel
     from tf_nodes.nodes_pipeline import TFDecode, TFGenerate, TFLatentPreview, TFLoadPipeline
     from tf_nodes.nodes_regions import TFRegionMap, TFTokensFromCoords
+    from tf_nodes.nodes_sweep import TFSweep
 
     print(f"{len(node_list())} nodes registered", flush=True)
 
@@ -112,7 +121,7 @@ def main() -> int:
     # --- 3. decode -----------------------------------------------------------
     t0 = time.perf_counter()
     images, warning = TFDecode.execute(
-        pipeline=pipeline, levels=levels, which="all levels", level=0, label_levels=True
+        pipeline=pipeline, levels=levels, which="all levels", level_override=-1, label_levels=True
     )
     frames = image_batch_to_uint8(images)
     save(frames, "01-original")
@@ -121,21 +130,22 @@ def main() -> int:
           f"{distinct} distinct level images in {time.perf_counter() - t0:.1f}s")
 
     previews, = TFLatentPreview.execute(
-        pipeline=pipeline, levels=levels, which="all levels", level=0, size=512,
+        pipeline=pipeline, levels=levels, which="all levels", level_override=-1, size=512,
         label_levels=True, palette_from=other,
     )
     save(image_batch_to_uint8(previews), "02-pca")
 
     # --- 4. regions ----------------------------------------------------------
-    regions, region_image, num_regions = TFRegionMap.execute(
+    regions, region_image, num_regions, region_level = TFRegionMap.execute(
         levels=levels, level=EDIT_LEVEL, cosine_threshold=0.9, size=512
     )
     save(image_batch_to_uint8(region_image), "03-regions")
     total_tokens = int(np.prod(regions.ids.shape))
     check(
         "regions",
-        1 < num_regions < total_tokens,
-        f"{num_regions} regions over {total_tokens} tokens at threshold 0.9",
+        1 < num_regions < total_tokens and region_level == EDIT_LEVEL,
+        f"{num_regions} regions over {total_tokens} tokens at threshold 0.9, "
+        f"level output {region_level}",
     )
 
     # --- 5. edit -------------------------------------------------------------
@@ -161,7 +171,7 @@ def main() -> int:
     # --- 6. resume -----------------------------------------------------------
     t0 = time.perf_counter()
     resumed, resume_info = TFResumeFromLevel.execute(
-        pipeline=pipeline, levels=edited, level=EDIT_LEVEL, follow_edit=True, class_id=-1, seed=SEED
+        pipeline=pipeline, levels=edited, level=EDIT_LEVEL, class_id=-1, seed=SEED
     )
     print(resume_info, flush=True)
     below_frozen = all(
@@ -179,7 +189,7 @@ def main() -> int:
     )
 
     edited_images, _ = TFDecode.execute(
-        pipeline=pipeline, levels=resumed, which="all levels", level=0, label_levels=True
+        pipeline=pipeline, levels=resumed, which="all levels", level_override=-1, label_levels=True
     )
     save(image_batch_to_uint8(edited_images), "04-edited")
 
@@ -191,7 +201,38 @@ def main() -> int:
         flush=True,
     )
 
-    # --- 7. control ----------------------------------------------------------
+    # --- 7. sweep ------------------------------------------------------------
+    # The same edit as step 5, run once per seed, with SEED first so the arm can
+    # be checked against step 6's explicit chain.
+    t0 = time.perf_counter()
+    sweep_seeds = [SEED, SEED + 1, SEED + 2]
+    report, sheet, picked, arms, spread = TFSweep.execute(
+        levels=levels, target_tokens=target, source_tokens=source,
+        axis="seed", values=",".join(str(s) for s in sweep_seeds),
+        level=EDIT_LEVEL, seed=SEED, strength=1.0, source_mode="region mean",
+        baseline=True, decode=True, arm_limit=12, output_arm=0, size=512,
+        source_levels=other, pipeline=pipeline,
+    )
+    print(report, flush=True)
+    save(image_batch_to_uint8(sheet), "05-sweep")
+
+    # The sweep's own control: arm 0 uses the same seed, level, class, target
+    # and source as step 6, so it must land on exactly step 6's trajectory. A
+    # loop that quietly differs -- a re-read source, a shifted seed, a resume
+    # from the wrong level -- would still produce a plausible table.
+    reproduces = np.array_equal(picked.latents, resumed.latents)
+    # The node says so itself when an arm came out identical to its baseline,
+    # rather than this script re-parsing the table's columns to find out.
+    every_arm_moved = "changed nothing at all" not in report
+    check(
+        "sweep",
+        arms == len(sweep_seeds) and reproduces and spread > 0 and every_arm_moved,
+        f"{arms} arms in {time.perf_counter() - t0:.1f}s, spread {spread:.4f}, "
+        f"every arm moved the final level: {every_arm_moved}, "
+        f"arm 0 {'reproduces' if reproduces else 'DIVERGES FROM'} the explicit chain",
+    )
+
+    # --- 8. control ----------------------------------------------------------
     control, = TFGenerate.execute(pipeline=pipeline, class_id=CLASS_ID, seed=SEED)
     check(
         "control",

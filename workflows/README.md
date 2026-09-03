@@ -1,6 +1,6 @@
 # The example workflows
 
-Four diagrams, in the order they are meant to be read. Each one is also
+Five diagrams, in the order they are meant to be read. Each one is also
 self-documenting: open it and there is a yellow note on the left saying what you
 are looking at, and the nodes are boxed into numbered groups.
 
@@ -16,6 +16,7 @@ canvas.
 | [02 · feature edit, typed](#02--feature-edit-coords) | change a region's content | yes |
 | [03 · feature edit, painted](#03--feature-edit-painter) | the same, with a brush | needs two runs |
 | [04 · shape edit](#04--shape-edit) | move a region's boundary | yes |
+| [05 · sweep the seed](#05--sweep-seeds) | one edit across four seeds, tabulated | yes |
 
 Everything here is generated from the live node definitions by
 `scripts/make_workflows.py`, so the files cannot drift from what the nodes
@@ -178,14 +179,85 @@ and therefore what a shape edit can move.
 
 ---
 
+## 05 · sweep seeds
+
+The same edit as workflow 02, run four times over.
+
+One before/after pair cannot answer *"was that the edit, or was that the seed?"*
+Re-sampling level 3 from an edited canvas is still sampling, and it lands
+somewhere different every time. *TF Sweep Edit* separates the two: it runs the
+identical edit once per seed, and for each arm it *also* re-samples the
+**unedited** canvas with that same seed. Each row is then the edit's effect with
+the seed held fixed and cancelled out.
+
+**Groups:** load and generate both trajectories → choose the edit (held fixed
+across every arm) → sweep and tabulate → one arm in detail.
+
+The table is in the node's own body:
+
+```
+seed         tokens changed   mean dist   max dist
+592            27 / 256         0.0664     0.8485
+593            24 / 256         0.0673     0.8156
+594            25 / 256         0.0667     0.8456
+
+spread across arms: 0.0270 mean pairwise cosine distance at level 3
+```
+
+Two numbers to read, and they mean different things:
+
+- **mean dist** — how far the edit moved the final level, against that arm's own
+  no-edit baseline. Here ~0.067, and consistent across seeds.
+- **spread across arms** — how far the arms are from *each other*. Here 0.027.
+  So the edit moves the result about 2.5× as far as the choice of seed does, and
+  a single-seed result from workflow 02 was worth trusting. Had the spread been
+  the larger of the two, it would not have been.
+
+Below the `changed` threshold the node says so outright, rather than leaving you
+to compare two decimals.
+
+**The contact sheet** is the no-edit baseline first, then one frame per arm — so
+the visual comparison has a control in it too.
+
+**Worth changing:**
+
+| widget | try |
+|---|---|
+| `values` | any list, or `1-8` for a range. Duplicates are dropped. |
+| `axis` → `level (l*)` | with `values` `0-3`: the same edit at each level in turn. This is the sweep Sec. 4.4 is really about — coarser edits cascade through more re-sampling. |
+| `axis` → `strength` | with `values` `0.25,0.5,0.75,1.0`: where a blend stops being a blend. |
+| `output_arm` (advanced) | which arm leaves on the `levels` output, for the *TF Compare Levels* at the bottom right, or for saving. |
+| `arm_limit` (advanced) | the guard that refuses to start rather than let a mistyped `0-1000` hold the GPU for an hour. |
+
+**Cost:** two re-samples and one decode per arm. Four arms is a few seconds once
+the model is warm; forty is a coffee. Turn `decode` off (advanced) and the
+contact sheet uses PCA tiles instead, which costs nothing — the table is
+identical either way.
+
+**Whatever is not on the axis is pinned** to its own widget, so no two arms ever
+differ in two ways at once. The report records the pinned values, which is what
+makes the table readable a month later.
+
+> Sweeping `level (l*)` is the one axis that cannot hold everything else fixed:
+> a selection snapped to level 2's regions is not a whole region at level 0. The
+> node keeps the **token set** fixed — which is what "the same edit at every
+> level" has to mean — and says so in the report rather than refusing. Use typed
+> coordinates rather than a snapped selection if you want the token set to be
+> exactly what you chose.
+
+It sweeps a *feature* edit. A shape edit is bound to one level's region map, so
+the only axis that means anything for it is the seed; wire *TF Shape Edit* into
+the explicit chain for that.
+
+---
+
 ## Building your own
 
-Useful pieces not wired into any of the four:
+Useful pieces not wired into any of the five:
 
 | node | for |
 |---|---|
 | **TF Tokens Combine** | union/intersect/subtract several selections into one region |
-| **TF Compare Levels** | tokens changed per level between two trajectories, plus a heatmap — the number a writeup wants |
 | **TF Save / Load Levels** | keep a trajectory across restarts, so two edits can be compared against the identical starting image |
 | **TF Levels Info** | the class, seed and full edit history of a trajectory |
 | **TF Level Canvas** → `view: decoded RGB` | paint against the picture instead of the false-colour tokens |

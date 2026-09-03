@@ -66,6 +66,7 @@ BODY_HEIGHT = {
     "TFLatentPreview": 150,
     "TFCompareLevels": 260,   # a per-level table
     "TFTokensFromMask": 220,  # the "nothing painted yet" instruction
+    "TFSweep": 620,           # a row per arm, plus the whole contact sheet
 }
 ROW_GAP = 26                  # vertical breathing room between stacked nodes
 
@@ -754,7 +755,97 @@ are, then pick coordinates on either side of one.
     return g
 
 
-BUILDERS = [generate_and_decode, feature_edit_coords, feature_edit_painter, shape_edit]
+def sweep_seeds() -> Graph:
+    g = Graph(
+        "05-sweep-seeds",
+        "Run one feature edit across four resume seeds and tabulate the result. Each arm is "
+        "measured against the same trajectory resumed identically without the edit, so the "
+        "number is the edit's effect rather than the seed's.",
+    )
+    g.note(
+        """
+# 5. The same edit, four times over
+
+**Press Run — this one works as-is.** It takes about four times as long as
+workflow 2, because it is doing the edit four times.
+
+Workflow 2 makes one edit and shows you the result. The question that follows
+is always *"was that the edit, or was that the seed?"* — re-sampling levels 3
+from an edited canvas is still sampling, and it lands somewhere different every
+time. One picture cannot tell you which part you are looking at.
+
+*TF Sweep Edit* answers it. It runs the identical edit once per **seed**, and
+for each one it also re-samples the *unedited* canvas with that same seed. Each
+row of the table is then the edit's effect with the seed held fixed and
+cancelled out.
+
+Read the table in the node's own body:
+
+- **tokens changed** — how many of the 256 tokens the edit moved, at the final
+  level, against that arm's own no-edit baseline.
+- **spread across arms** — the one number worth having. Near zero means every
+  seed landed in the same place, so the *edit* decides the outcome. Large means
+  the seed does, and a single-seed result from workflow 2 was not telling you
+  much.
+
+The contact sheet is the no-edit baseline first, then one frame per arm.
+
+**Try:**
+- *values*: `592,593,594,595` — any list, or `1-8` for a range. `arm_limit`
+  (advanced) is there so a mistyped range cannot hold the GPU for an hour.
+- *axis* → **`level (l*)`** with *values* `0-3`: the same edit applied at each
+  level in turn. This is the sweep the paper's Sec. 4.4 is really about —
+  coarser edits cascade through more re-sampling, and the table shows it.
+- *axis* → **`strength`** with *values* `0.25,0.5,0.75,1.0`: where a blend stops
+  being a blend and starts being a replacement.
+- *output_arm* (advanced) picks which arm leaves on the `levels` output, for
+  saving or comparing. Everything else about that arm is in the report.
+
+Whatever is not on the axis is **pinned** to its own widget, so no two arms
+ever differ in two ways at once.
+""",
+        column=-1.15, row=0, title="README — read me first", width=400, height=700,
+    )
+
+    pipe = g.add("TFLoadPipeline", 0, 0)
+    target = g.add("TFGenerate", 1, 0, title="target — the image being edited",
+                   pipeline=(pipe, 0), class_id=213, seed=592)
+    source = g.add("TFGenerate", 1, 6, title="source — where the new feature comes from",
+                   pipeline=(pipe, 0), class_id=207, seed=592)
+    g.group("1 · Load and generate both trajectories", [pipe, target, source])
+
+    regions = g.add("TFRegionMap", 2, 0, levels=(target, 0), level=2, cosine_threshold=0.9)
+    region_view = g.add("PreviewImage", 2, 6, title="the regions — pick coordinates from this",
+                        images=(regions, 1))
+    tgt_tokens = g.add("TFTokensFromCoords", 3, 0, title="target region — WHERE the edit lands",
+                       coords="7,7", levels=(target, 0), regions=(regions, 0))
+    src_tokens = g.add("TFTokensFromCoords", 3, 5, title="source tokens — WHAT gets written",
+                       coords="6,6:9", levels=(source, 0))
+    g.group("2 · Choose the edit — held fixed across every arm",
+            [regions, region_view, tgt_tokens, src_tokens], colour="#b58b2a")
+
+    # `level` is wired from the region map for the same reason as in workflow 2:
+    # the selection is snapped to that level's regions and means nothing at
+    # another. A level sweep overrides it per arm and says so in the report.
+    sweep = g.add(
+        "TFSweep", 4, 0, title="TF Sweep Edit — the table is in this node",
+        levels=(target, 0), target_tokens=(tgt_tokens, 0), source_tokens=(src_tokens, 0),
+        source_levels=(source, 0), axis="seed", values="592,593,594,595",
+        level=(regions, 3), seed=592, strength=1.0,
+    )
+    sheet = g.add("PreviewImage", 5, 0, title="baseline first, then one frame per arm",
+                  images=(sweep, 1))
+    g.group("3 · Sweep the seed and tabulate", [sweep, sheet], colour="#a1309b")
+
+    compare = g.add("TFCompareLevels", 4, 12, before=(target, 0), after=(sweep, 2), size=512)
+    compare_view = g.add("PreviewImage", 5, 12, title="where the picked arm changed, per level",
+                         images=(compare, 1))
+    g.group("4 · One arm in detail", [compare, compare_view], colour="#8A8")
+    return g
+
+
+BUILDERS = [generate_and_decode, feature_edit_coords, feature_edit_painter, shape_edit,
+            sweep_seeds]
 
 
 def main() -> int:

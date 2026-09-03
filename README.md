@@ -115,7 +115,7 @@ Both routes resolve these on first use — nothing to download by hand:
 
 ## Start here
 
-Four example workflows, walked through in
+Five example workflows, walked through in
 **[workflows/README.md](workflows/README.md)** and self-documenting on the
 canvas — each opens with a note explaining it, with the nodes boxed into
 numbered groups.
@@ -126,6 +126,7 @@ numbered groups.
 | `02-feature-edit-coords` | change a region's content | yes |
 | `03-feature-edit-painter` | the same, with a brush | needs two runs |
 | `04-shape-edit` | move a region's boundary | yes |
+| `05-sweep-seeds` | one edit across four seeds, tabulated | yes |
 
 ---
 
@@ -198,7 +199,43 @@ what propagates it.
 | **TF Feature Edit** | Replaces the target tokens' features with one sourced from elsewhere — same trajectory or a second one. `region mean` is the paper's `f_src` (one averaged vector fills the target); `token cycle` copies token-for-token. `strength` interpolates rather than replacing. |
 | **TF Shape Edit** | Hands boundary tokens from one region to a neighbour: they take on the *receiving region's* mean feature, so its extent changes and its content does not. |
 | **TF Resume From Level** | Re-samples every level above *l\**, conditioned on the canvas sitting there. Levels below are untouched — sampling is Markov in the level index, so an edit only ever propagates upward. Left alone it follows the upstream edit, so *l\** cannot disagree with where the edit landed. |
+| **TF Sweep Edit** | The whole chain above, run once per value of **one** axis — a seed list, the levels, or a strength ramp — with everything else pinned. See below. |
 | **TF Save / Load Levels** | A trajectory to and from `output/trajectory_forcing/*.npz`, with its class, seed and edit history. A trajectory costs GPU time and is what every edit is measured against; reloading the exact one an earlier run used is what makes two edits comparable. |
+
+### Sweeping
+
+The reason to prefer a graph over the editing env's Gradio app is that the same
+edit can be run across a seed list, or across *l\**, and tabulated. **TF Sweep
+Edit** is that loop: feature edit → resume → measure, once per value, with
+everything not on the axis pinned to its own widget, so no two arms ever differ
+in two ways at once.
+
+Two things make it an experiment tool rather than a batch button:
+
+- **Every arm is measured against its own baseline** — the same trajectory
+  resumed from the same level with the same seed and *no* edit. Re-sampling
+  from an edited canvas is still sampling, so without that, "the final image
+  changed a lot" cannot be told apart from "the resume seed changed a lot", and
+  a seed sweep mostly measures the seed. (`baseline` is advanced and can be
+  turned off; the report says which reference it used either way.)
+- **The spread across arms is reported** — the mean pairwise cosine distance
+  between arms at the final level. Near zero means every arm landed in the same
+  place, so the *edit* decides the outcome and a single-seed result was
+  trustworthy. Large means the seed does, and it was not.
+
+The node's body carries the table and the contact sheet (the no-edit baseline
+first, then one frame per arm); `levels` hands one arm on for saving or
+comparing. Cost is two re-samples and one decode per arm, and `arm_limit`
+(advanced) refuses to start rather than let a mistyped `0-1000` hold the GPU.
+
+Sweeping *l\** is the one axis that cannot hold everything else fixed: a
+selection snapped to one level's regions is not a whole region at another. The
+node keeps the **token set** fixed, which is what "the same edit at every level"
+has to mean, and says so in the report rather than refusing.
+
+It sweeps a *feature* edit. A shape edit is bound to one level's region map, so
+there is no meaningful axis to sweep it along except the seed; use TF Shape Edit
+with the explicit chain.
 
 **Most nodes need no `pipeline` wire.** A trajectory carries the pipeline that
 produced it, so TF Decode, TF Latent Preview, TF Level Canvas, TF Resume and TF
@@ -222,6 +259,18 @@ you the pre-edit trajectory above *l\**.
 **"Nothing painted yet" in workflow 03.** Working as intended — that workflow
 needs two runs. See
 [workflows/README.md](workflows/README.md#03--feature-edit-painter).
+
+**Warnings at startup.** Three appear on every run and all three are benign —
+none of them is worth acting on:
+
+| warning | why it is harmless |
+|---|---|
+| `Tensorflow library not found, tensorflow.io.gfile operations will use native shim calls` | `flax` prefers TensorFlow's filesystem layer and falls back to plain Python IO without it. The only thing lost is `gs://` (Google Cloud Storage) paths, and every weight this loads is a local file. Installing TensorFlow to silence it would add ~600 MB for no function. |
+| `You need pytorch with cu130 or higher to use optimized CUDA operations` | ComfyUI's own quantisation kernels, which nothing here uses. torch stays on cu128 to share a CUDA major with `jax[cuda12]`. |
+| `The given NumPy array is not writable ... converting it to a tensor` | The RAE decoder wrapping a read-only latent array. It only reads it. |
+
+They are deliberately not suppressed: silencing third-party warnings by default
+is how a real one gets missed later.
 
 **`Address already in use` from `serve.sh`.** It clears its own leftovers at
 startup and steps to the next free port if something else holds it, so this
@@ -253,6 +302,12 @@ after trajectories: it reports tokens changed per level. If the answer is zero,
 check the *what was selected* preview — most often the selection is not where
 you thought. If the levels above your edit look stale, *TF Resume From Level*
 has not run.
+
+**An edit appears to do something, but you are not sure it was the edit.**
+Re-sampling from an edited canvas is still sampling, so one before/after pair
+cannot separate the edit from the seed. *TF Sweep Edit* on the `seed` axis runs
+the same edit across several seeds against a no-edit baseline for each, and
+reports the spread. Workflow 05 is that graph, ready to run.
 
 **"built from level N's regions but is being applied at level M".** A selection
 was snapped to a region map from a different level. Point *TF Region Map* at the

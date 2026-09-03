@@ -16,7 +16,7 @@ dependencies = []
 Repository = "https://github.com/korayulusan/ComfyUI-TrajectoryForcing"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "korayulusan"
 DisplayName = "Trajectory Forcing"
 Icon = ""
 

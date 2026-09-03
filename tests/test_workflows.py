@@ -38,7 +38,7 @@ def api_workflow(request, workflow):
 
 
 def test_there_are_workflows_to_check():
-    assert len(WORKFLOWS) == 4
+    assert len(WORKFLOWS) == 5
 
 
 def test_no_two_nodes_overlap(workflow):

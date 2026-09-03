@@ -35,7 +35,7 @@ level 3 to fit — it does not paste a rectangle over the result:
 boxes ("nodes") wired together. You do not write any code; you load a diagram,
 change a couple of numbers, and press Run.
 
-**This extension** adds the Trajectory Forcing boxes to ComfyUI, plus four
+**This extension** adds the Trajectory Forcing boxes to ComfyUI, plus five
 ready-made diagrams to start from.
 
 ---
@@ -180,9 +180,32 @@ needs two runs, and that is deliberate.
 
 ---
 
+## "Was that the edit, or was that luck?"
+
+The question that follows your first edit, and it is a fair one. Redoing the
+finer passes from an edited canvas is still *generating*, so it lands somewhere
+slightly different each time. One before-and-after pair cannot tell you which
+part of the difference you caused.
+
+Open `workflows/05-sweep-seeds.json` and press Run. It makes the same edit four
+times with four different random seeds, and for each one it also re-runs the
+*unedited* image with that same seed to compare against. The table in the middle
+node then reads:
+
+```
+spread across arms: 0.0270 mean pairwise cosine distance at level 3
+```
+
+Small means every attempt landed in the same place, so the edit is what decided
+the picture. Large means the random seed was, and one result was not telling you
+much. It is the same question you would ask of any experiment, and it is a lot
+easier to ask here than by making the edit four times by hand.
+
+---
+
 ## Where to go next
 
-- **[workflows/README.md](../workflows/README.md)** — what each of the four
+- **[workflows/README.md](../workflows/README.md)** — what each of the five
   diagrams does and what to change in it.
 - **[README.md](../README.md)** — every node, what its settings mean, and the
   Slurm route.

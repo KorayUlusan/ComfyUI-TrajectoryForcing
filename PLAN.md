@@ -20,7 +20,7 @@ someone using it for a real edit, which is the next thing.
 
 | build step | state |
 |---|---|
-| 1. Load + Generate + Decode | done — `gpu_smoke` 7/7, job 449604 |
+| 1. Load + Generate + Decode | done — `gpu_smoke` 8/8, job 449818 |
 | 2. Region picker, read-only | done, but not as a custom widget — see the pivot below |
 | 3. Feature edit (same-canvas and cross-canvas) | done — `TF Feature Edit`, both source modes |
 | 4. Resume, closing the loop | done — `TF Resume From Level` |
@@ -28,13 +28,21 @@ someone using it for a real edit, which is the next thing.
 
 Verification, all reproducible from this repo:
 
-- `pytest tests` — 213 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
+- `pytest tests` — 269 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
   every node's schema and `execute` against a stub pipeline.
-- `slurm/gpu_smoke.sbatch` — the nodes against the real TF-L model. **7/7,
-  job 449604 on mlcbm011**, including the control (same class + seed reproduces
-  the trajectory bit-for-bit). Load 14.6 s warm, generate 0.1 s, resume 2.2 s.
+- `slurm/gpu_smoke.sbatch` — the nodes against the real TF-L model. **8/8,
+  job 449818**, including two controls: same class + seed reproduces the
+  trajectory bit-for-bit, and the sweep's arm 0 reproduces the explicit
+  edit-and-resume chain bit-for-bit. Load 16.4 s warm, generate 0.1 s, resume
+  2.3 s, a three-seed sweep 0.7 s. (Superseded 7/7 on job 449604, which predates
+  `TF Compare Levels` and `TF Sweep Edit`.)
 - `slurm/server_smoke.sbatch` — the workflows through a real ComfyUI server.
-  **9/9, job 449655 on mlcbm011.** The first attempt (449598) was 2/6 and is
+  **11/11, job 449819 on mlcbm006**, 19 nodes registered, all five workflows
+  executed. This is the only check that a node running several re-samples in one
+  `execute` survives ComfyUI's execution engine rather than a direct call, and
+  that the sweep's table reaches the client rather than only its images.
+  (Superseded 9/9 on job 449655, which predates workflow 05.) The first attempt
+  (449598) was 2/6 and is
   what found both the namespace bug below and a workflow naming an ImageNet
   class string one word off. The criteria covering the painter
   workflow's quiet stop were added after the first browser session and took five
@@ -213,7 +221,7 @@ contains its nodes leaves them behind when dragged.
 
 **One README could not serve both audiences.** Split into `README.md` (someone
 who knows ComfyUI), `docs/GETTING-STARTED.md` (someone who has never opened it),
-`workflows/README.md` (a tutorial for the four examples) and `CONTRIBUTING.md`
+`workflows/README.md` (a tutorial for the five examples) and `CONTRIBUTING.md`
 (the sharp edges). The requirements section now carries measured numbers rather
 than a guess: `scripts/measure_resources.py` reports **6.6 GiB peak VRAM** and
 5.3 GiB host RAM for the full editing workflow (job 449659), which puts the
@@ -332,20 +340,73 @@ terminal in raw mode, and a background writer into it is what produced the
 stair-stepped output -- the garbling and the bind error were the same bug seen
 from two angles.
 
+## The sweep node (2026-09-03)
+
+The gap named at the end of the second browser session, closed. `TF Sweep Edit`
+runs feature edit → resume → measure once per value of one axis (`seed`,
+`level (l*)`, `strength`), with everything else pinned, and emits a table, a
+contact sheet and one arm on a `TF_LEVELS` output. Workflow 05 is that graph.
+
+Three decisions are worth recording, because each was a fork in the design:
+
+**Every arm gets its own baseline.** The obvious implementation measures each
+arm against the input trajectory. That is wrong for the axis the node exists
+for: resuming from an edited canvas is still sampling, so a seed sweep measured
+that way reports the seed's effect and the edit's added together, and the
+biggest number wins for the wrong reason. Each arm is instead measured against
+the *same* trajectory resumed at the same level with the same seed and no edit
+— one extra resume per arm, which is ≤3 NFE and cheap next to the decode. The
+baseline is cached per `(level, seed)`, so a strength sweep pays for one rather
+than one per arm. Confirmed on hardware: the four-arm strength case issues five
+resumes, not eight.
+
+**The spread across arms is the output that justifies the node.** Per-arm
+"tokens changed" is what `TF Compare Levels` already gives, four times over.
+The number only a sweep can produce is the mean pairwise distance *between*
+arms: whether the axis moves the outcome at all. On job 449818 a three-seed
+sweep gave mean edit distance 0.066 against arm-to-arm spread 0.027 — the edit
+is ~2.5× the seed noise, so the single-seed result in workflow 02 was worth
+trusting. Had the ratio gone the other way it would not have been, and nothing
+in the previous toolset could have said so.
+
+**Sweeping l\* breaks the level check, deliberately.** A selection snapped to
+level 2's regions is refused at another level everywhere else in the extension,
+and that guard is right — the token grid is the same size at every level, so the
+edit would otherwise land on the wrong region silently. But "the same edit at
+every level" has to mean the same *token set*, so the level axis is the one
+place the binding cannot hold. It reports the caveat instead of refusing; the
+other two axes keep the check. Refusing would have made the axis unusable and
+quietly dropping the check would have made three other axes unsafe.
+
+The sweep carries its own control, in `gpu_smoke.py` criterion 7: the arm whose
+seed matches the explicit edit-and-resume chain must reproduce that chain's
+trajectory bit-for-bit. A loop that re-reads the source at the wrong level, or
+shifts a seed by one, still produces a plausible table — the table is not
+self-checking, so something else has to be.
+
+Not swept: a shape edit, which is bound to one level's region map and so has no
+meaningful axis but the seed.
+
 ## Next
 
 Ordered by what would change the design, not by size.
 
-1. **Keep using it.** The two fixes above came from one launch. Everything below
-   is still a guess until a specific edit has been made end to end.
+1. **Keep using it.** Everything below is still a guess until a specific edit has
+   been made end to end, and then swept.
 2. **Region granularity.** Cosine threshold 0.9 gives ~50 regions over 256 tokens
    at level 2 — subpart-scale, which is right for the level but fiddly to paint
    against. Worth checking whether a per-level default (looser at level 0,
    tighter at level 3) makes the region map more useful than one slider does.
-3. **A batch/sweep node.** The thing this graph makes cheap that the Gradio app
-   does not is running the same edit across seeds or across *l\**. A node that
-   fans a trajectory out over a seed list would turn the extension into an
-   experiment tool rather than a demo.
-4. **Save the decoded intermediates alongside the `.npz`.** `TF Save Levels`
+   The sweep can now answer this rather than it staying a guess: `cosine_threshold`
+   is not an axis, but running one edit at four thresholds by hand is four runs
+   of workflow 05, and the spread numbers are comparable across them.
+3. **Save the decoded intermediates alongside the `.npz`.** `TF Save Levels`
    stores latents and history; a run that has to be cited later also wants the
-   images that were looked at.
+   images that were looked at. More pressing now that a sweep produces a sheet
+   worth keeping.
+4. **A second sweep axis.** A 4×4 grid (seed × l\*) is what an actual results
+   table wants, and the repo's own experiment notes are emphatic that a
+   four-seed cell has already overstated a gap here badly enough to need a
+   public correction. One axis is the honest starting point — it keeps "one
+   variable per arm" true by construction — but the cell size argument points
+   at two.

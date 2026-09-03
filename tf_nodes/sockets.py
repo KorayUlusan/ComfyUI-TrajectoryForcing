@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from comfy_api.latest import io, ui
 
-# Subcategories mirror the README's own three sections. Eighteen nodes in one
+# Subcategories mirror the README's own three sections. Nineteen nodes in one
 # flat list is a scroll; the split is how you find "the node that picks a
 # region" without already knowing its name. Search still spans all of them.
 CATEGORY = "TrajectoryForcing"

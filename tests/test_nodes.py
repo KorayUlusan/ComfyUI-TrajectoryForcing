@@ -41,10 +41,16 @@ class StubPipeline:
     def resume(self, latents, start_level, class_id, seed):
         self.calls.append(("resume", start_level, class_id, seed))
         out = np.array(latents, dtype=np.float32, copy=True)
-        # mimic the real thing: levels above start_level are re-sampled, below untouched
+        # Mimic the real thing: levels above start_level are re-sampled, levels
+        # below are untouched, and each re-sampled level is conditioned on the
+        # one under it. The conditioning is not decoration -- without it an edit
+        # at l* leaves the final level bit-identical, so anything measuring the
+        # edit's effect at the top (TF Compare Levels, TF Sweep Edit) would be
+        # reading the seed and nothing else, and the test would pass regardless.
         rng = np.random.default_rng(seed)
         for level in range(start_level + 1, LEVELS):
-            out[level] = rng.normal(size=(GRID, GRID, CHANNELS)).astype(np.float32)
+            noise = rng.normal(size=(GRID, GRID, CHANNELS)).astype(np.float32)
+            out[level] = noise + out[level - 1]
         return out
 
     def decode(self, latents, final_only):
@@ -820,6 +826,224 @@ class TestCompareLevels:
         assert "nan" not in report.lower()
 
 
+class TestSweepEdit:
+    """One edit run many times, varying exactly one thing.
+
+    The node the extension exists for: the same edit across seeds or across
+    l*, tabulated. Doing it by hand means duplicating the chain per arm.
+    """
+
+    DEFAULTS = dict(
+        axis="seed", values="1,2,3", level=2, seed=7, strength=1.0,
+        source_mode="region mean", baseline=True, decode=True,
+        arm_limit=12, output_arm=0, size=128, source_levels=None,
+    )
+
+    @pytest.fixture
+    def levels(self, pipeline):
+        """Overrides the module fixture: a stack that carries its pipeline.
+
+        The module-level one deliberately has none, to stand in for a
+        trajectory restored from disk. A sweep needs the real thing, because
+        it re-samples once per arm rather than reading the latents it was given.
+        """
+        from tf_nodes.data import LevelStack
+
+        return LevelStack(
+            latents=pipeline.generate(213, 1), class_id=213, seed=1,
+            history=("stub",), pipeline=pipeline,
+        )
+
+    def _run(self, node_classes, levels, **overrides):
+        target, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="1,1 1,2", levels=levels)
+        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="5,5", levels=levels)
+        kwargs = {**self.DEFAULTS, "target_tokens": target, "source_tokens": source}
+        kwargs.update(overrides)
+        return node(node_classes, "TFSweep").execute(levels=levels, **kwargs)
+
+    # ----- the loop itself -----
+    def test_one_arm_per_value(self, node_classes, levels):
+        report, sheet, _, arms, _ = self._run(node_classes, levels, values="1,2,3")
+        assert arms == 3
+        assert sheet.shape[0] == 4, "the no-edit baseline, then one frame per arm"
+        for seed in (1, 2, 3):
+            assert f"\n{seed:<12g}" in f"\n{report}" or f"\n{seed} " in report
+
+    def test_each_arm_is_edited_and_resumed_at_its_own_value(self, node_classes, pipeline, levels):
+        self._run(node_classes, levels, values="4,5")
+        for seed in (4, 5):
+            assert ("resume", 2, 213, seed) in pipeline.calls
+
+    def test_a_level_sweep_resumes_from_each_level(self, node_classes, pipeline, levels):
+        self._run(node_classes, levels, axis="level (l*)", values="0-2")
+        for level in (0, 1, 2):
+            assert ("resume", level, 213, 7) in pipeline.calls
+
+    def test_the_baseline_is_resumed_once_per_distinct_arm_not_once_per_arm(
+            self, node_classes, pipeline, levels):
+        # A strength sweep pins the level and the seed, so every arm shares one
+        # baseline. Re-resuming it per arm would double the sweep's cost for
+        # nothing -- and on real hardware that is the whole run.
+        self._run(node_classes, levels, axis="strength", values="0.25,0.5,0.75,1.0")
+        resumes = [c for c in pipeline.calls if c[0] == "resume"]
+        assert len(resumes) == 5, f"4 arms + 1 shared baseline, got {resumes}"
+
+    def test_baseline_off_skips_the_extra_resumes(self, node_classes, pipeline, levels):
+        self._run(node_classes, levels, values="1,2", baseline=False)
+        assert len([c for c in pipeline.calls if c[0] == "resume"]) == 2
+
+    # ----- the numbers -----
+    def test_every_arm_is_measured_against_its_own_baseline(self, node_classes, levels):
+        # Not against the input trajectory: with a seed axis that folds the
+        # seed's own effect into every row, and the table then says the edit
+        # did something when only the re-sample did.
+        report, _, _, _, _ = self._run(node_classes, levels, values="1,2,3")
+        assert "resumed identically without the edit" in report
+        off, _, _, _, _ = self._run(node_classes, levels, values="1,2,3", baseline=False)
+        assert "baseline off" in off
+
+    def test_the_table_has_a_row_per_arm_with_a_change_count(self, node_classes, levels):
+        report, _, _, _, _ = self._run(node_classes, levels, values="1,2,3")
+        body = report.splitlines()
+        rows = [ln for ln in body if "/" in ln and ln[0].isdigit()]
+        assert len(rows) == 3, body
+        total = levels.grid[0] * levels.grid[1]
+        assert all(f"/ {total}" in row for row in rows)
+
+    def test_the_edit_registers_against_the_baseline(self, node_classes, levels):
+        # The stub resume conditions each level on the one below, so an edit at
+        # l* must still be visible at the top. If this ever reads zero the
+        # measurement is wired to the wrong reference.
+        report, _, _, _, spread = self._run(node_classes, levels, values="1,2,3")
+        assert "changed nothing at all" not in report
+        assert spread > 0
+
+    def test_the_spread_says_whether_the_axis_mattered(self, node_classes, levels):
+        report, _, _, _, spread = self._run(node_classes, levels, values="1,2,3")
+        assert "spread across arms" in report
+        assert spread > 0 and "does change the outcome" in report
+
+    def test_a_single_arm_reports_no_spread_rather_than_zero(self, node_classes, levels):
+        # Zero spread over one arm is not "the axis did nothing", it is "there
+        # was nothing to compare" -- and the two read identically as a number.
+        report, _, _, arms, _ = self._run(node_classes, levels, values="1")
+        assert arms == 1
+        assert "n/a with a single arm" in report
+
+    # ----- what leaves the node -----
+    def test_the_picked_arm_leaves_on_the_levels_output(self, node_classes, levels):
+        _, _, first, _, _ = self._run(node_classes, levels, values="4,5,6", output_arm=0)
+        _, _, third, _, _ = self._run(node_classes, levels, values="4,5,6", output_arm=2)
+        assert (first.seed, third.seed) == (4, 6)
+        assert not np.allclose(first.latents[-1], third.latents[-1])
+
+    def test_the_output_arm_carries_no_pending_edit(self, node_classes, levels):
+        # It has been resumed, so nothing above l* is stale; leaving the marker
+        # set would make TF Decode warn about a trajectory that is fine.
+        _, _, out, _, _ = self._run(node_classes, levels, values="1,2")
+        assert out.dirty_level is None
+        assert "sweep arm 0 of 2" in out.history[-1]
+
+    def test_an_out_of_range_output_arm_clamps_and_says_so(self, node_classes, levels):
+        report, _, out, _, _ = self._run(node_classes, levels, values="1,2", output_arm=9)
+        assert out.seed == 2
+        assert "clamped to the last arm" in report
+
+    def test_the_trajectory_keeps_its_pipeline_so_downstream_nodes_work(
+            self, node_classes, levels):
+        _, _, out, _, _ = self._run(node_classes, levels, values="1,2")
+        report, _, _, _ = node(node_classes, "TFCompareLevels").execute(
+            before=levels, after=out, size=128, decode_difference=False)
+        assert "tokens changed" in report
+
+    # ----- the contact sheet -----
+    def test_the_sheet_frames_are_all_stackable(self, node_classes, levels):
+        # to_image stacks them into one batch and numpy will not stack ragged
+        # frames; a decoded arm and a PCA tile are different sizes.
+        _, decoded, _, _, _ = self._run(node_classes, levels, values="1,2", decode=True)
+        _, latent, _, _, _ = self._run(node_classes, levels, values="1,2", decode=False)
+        assert decoded.shape[0] == latent.shape[0] == 3
+
+    def test_it_shows_its_own_table_and_sheet(self, node_classes, levels):
+        out = self._run(node_classes, levels, values="1,2")
+        assert "spread across arms" in ui_text(out)
+        # The whole sheet, not a thumbnail of it: the arms are only worth
+        # anything side by side, and this node's body is where they land.
+        assert len(ui_images(out)) == 3
+
+    # ----- guards -----
+    def test_a_mistyped_range_is_refused_before_any_gpu_work(
+            self, node_classes, pipeline, levels):
+        with pytest.raises(ValueError, match="arm_limit"):
+            self._run(node_classes, levels, values="0-99")
+        assert not [c for c in pipeline.calls if c[0] == "resume"]
+
+    def test_a_level_outside_the_trajectory_is_refused(self, node_classes, levels):
+        with pytest.raises(ValueError, match="outside this trajectory"):
+            self._run(node_classes, levels, axis="level (l*)", values="0-9")
+
+    def test_a_cross_level_selection_is_still_caught_on_a_seed_sweep(
+            self, node_classes, two_region_levels, pipeline):
+        from dataclasses import replace
+
+        levels = replace(two_region_levels, pipeline=pipeline)
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+            levels=levels, level=1, cosine_threshold=0.9, size=128)
+        snapped, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=levels, regions=regions)
+        plain, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="5,5", levels=levels)
+        with pytest.raises(ValueError, match="level 1's regions"):
+            node(node_classes, "TFSweep").execute(
+                levels=levels, target_tokens=snapped, source_tokens=plain,
+                **{**self.DEFAULTS, "values": "1,2"})
+
+    def test_a_level_sweep_states_the_caveat_instead_of_refusing(
+            self, node_classes, two_region_levels, pipeline):
+        # Sweeping l* breaks a region-snapped selection's level binding by
+        # construction: holding the token *set* fixed is what "the same edit at
+        # every level" has to mean. Refusing would make the axis unusable, so
+        # the report says what was actually held fixed.
+        from dataclasses import replace
+
+        levels = replace(two_region_levels, pipeline=pipeline)
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+            levels=levels, level=1, cosine_threshold=0.9, size=128)
+        snapped, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=levels, regions=regions)
+        plain, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="5,5", levels=levels)
+        report, _, _, _, _ = node(node_classes, "TFSweep").execute(
+            levels=levels, target_tokens=snapped, source_tokens=plain,
+            **{**self.DEFAULTS, "axis": "level (l*)", "values": "0-2"})
+        assert "snapped to level 1's regions" in report
+
+    def test_an_empty_selection_is_refused(self, node_classes, levels):
+        empty, _, _ = node(node_classes, "TFTokensFromCoords").execute(coords="", levels=levels)
+        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="5,5", levels=levels)
+        with pytest.raises(ValueError, match="target_tokens is empty"):
+            node(node_classes, "TFSweep").execute(
+                levels=levels, target_tokens=empty, source_tokens=source, **self.DEFAULTS)
+
+    def test_a_trajectory_with_no_pipeline_says_where_to_wire_one(self, node_classes):
+        from tf_nodes.data import LevelStack
+
+        orphan = LevelStack(
+            latents=np.zeros((LEVELS, GRID, GRID, CHANNELS), np.float32), class_id=1, seed=1)
+        with pytest.raises(ValueError, match="TF Load Pipeline"):
+            self._run(node_classes, orphan, values="1,2")
+
+    def test_the_report_records_the_pinned_settings(self, node_classes, levels):
+        # A table read a month later has to say what was held fixed, or the
+        # numbers in it cannot be reproduced.
+        report, _, _, _, _ = self._run(node_classes, levels, values="1,2", level=1, strength=0.5)
+        assert "pinned: level 1, strength 0.50, class 213" in report
+        assert "2 target tokens" in report and "1 source tokens" in report
+
+
 class TestOneWidgetInsteadOfTwo:
     """`which` + `level` and `follow_edit` + `level` were both a mode plus a
     number the mode silently ignored. Each is now a single control that always
@@ -919,7 +1143,8 @@ class TestEveryNodeShowsItsOwnResult:
         "TFLoadPipeline", "TFImageNetClass", "TFLevelsInfo", "TFDecode",
         "TFLatentPreview", "TFRegionMap", "TFTokensFromMask", "TFTokensFromCoords",
         "TFTokensCombine", "TFTokensPreview", "TFFeatureEdit", "TFShapeEdit",
-        "TFResumeFromLevel", "TFCompareLevels", "TFSaveLevels", "TFLoadLevels",
+        "TFResumeFromLevel", "TFCompareLevels", "TFSweep", "TFSaveLevels",
+        "TFLoadLevels",
     }
 
     def test_they_all_declare_a_string_output_or_show_text(self, node_classes):

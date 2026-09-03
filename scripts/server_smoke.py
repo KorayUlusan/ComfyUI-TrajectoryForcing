@@ -12,12 +12,18 @@ Exit criteria, fixed before the run:
 
   1. startup   -- the server answers /object_info, and every node this extension
                   declares is in it with the socket types it declared.
-  2. execute   -- 01, 02 and 04 each run to completion with no node errors, and
-                  produce preview images.
+  2. execute   -- 01, 02, 04 and 05 each run to completion with no node errors,
+                  and produce preview images. 05 is the sweep, so this is also
+                  the only check that the loop survives ComfyUI's own execution
+                  engine rather than a direct call -- it runs several re-samples
+                  inside one node, which is not a shape any other node here has.
   3. edit      -- 02's edited output differs from its unedited control branch.
                   A workflow that runs but changes nothing would pass criterion
                   2 while the edit silently did nothing.
-  4. blocked   -- 03 (the Painter one) stops at TF Tokens From Mask with no
+  4. sweep     -- 05's report names every arm it was asked for and reports a
+                  spread, so the table reached the client rather than only the
+                  images. A sweep that silently ran one arm would pass 2.
+  5. blocked   -- 03 (the Painter one) stops at TF Tokens From Mask with no
                   error dialog at all, on *two* consecutive runs -- the bug this
                   replaced raised on the first run and went silent on the
                   second, so one run cannot tell the two apart. It must still
@@ -60,7 +66,7 @@ EXPECTED_NODES = {
     "TFLevelsInfo", "TFLevelCanvas", "TFRegionMap", "TFTokensFromMask",
     "TFTokensFromCoords", "TFTokensCombine", "TFTokensPreview", "TFFeatureEdit",
     "TFShapeEdit", "TFResumeFromLevel", "TFSaveLevels", "TFLoadLevels",
-    "TFCompareLevels",
+    "TFCompareLevels", "TFSweep",
 }
 
 _results: list[tuple[str, bool, str]] = []
@@ -200,7 +206,8 @@ def main() -> int:
 
         # --- 2 & 3. execute --------------------------------------------------
         entries = {}
-        for name in ("01-generate-and-decode", "02-feature-edit-coords", "04-shape-edit"):
+        for name in ("01-generate-and-decode", "02-feature-edit-coords", "04-shape-edit",
+                     "05-sweep-seeds"):
             started = time.perf_counter()
             ok, entry, detail = run_workflow(base, name, client_id)
             images = fetch_images(base, entry, name) if ok else 0
@@ -225,7 +232,17 @@ def main() -> int:
             f"{len(edited_files)} distinct preview images from the edit workflow",
         )
 
-        # --- 4. the painter workflow's first two runs ------------------------
+        # --- 4. the sweep's table reaches the client --------------------------
+        sweep_said = json.dumps(entries.get("05-sweep-seeds", {}).get("outputs", {}))
+        arms_named = [s for s in ("592", "593", "594", "595") if s in sweep_said]
+        check(
+            "the sweep reports every arm and a spread",
+            len(arms_named) == 4 and "spread across arms" in sweep_said,
+            f"{len(arms_named)}/4 arms named in the node's own output text"
+            if "spread across arms" in sweep_said else f"no table in {sweep_said[:400]}",
+        )
+
+        # --- 5. the painter workflow's first two runs ------------------------
         # Run it twice. The bug this replaced showed an error dialog on the
         # first run and nothing on the second, because the second found the node
         # cached -- so a single run cannot tell whether it is fixed.

@@ -15,6 +15,7 @@ import numpy as np
 from comfy_api.latest import io
 
 from . import render
+from .measure import CHANGED, heat, per_token_distance
 from .sockets import (
     CATEGORY_EDIT,
     TFLevelsSocket,
@@ -22,46 +23,6 @@ from .sockets import (
     pipeline_input,
     resolve_pipeline,
 )
-
-# Per-token change is scale-free: cosine distance between the two feature
-# vectors, which is the same measure TF Region Map clusters with, so "changed"
-# here means the same thing as "a different region" there.
-CHANGED = 0.02
-
-
-def _per_token_distance(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Cosine distance per token between two [H,W,C] canvases, in 0..2."""
-    a = np.nan_to_num(np.asarray(a, dtype=np.float32))
-    b = np.nan_to_num(np.asarray(b, dtype=np.float32))
-    na = np.linalg.norm(a, axis=-1)
-    nb = np.linalg.norm(b, axis=-1)
-    dot = np.sum(a * b, axis=-1)
-    # A zero vector has no direction, so cosine is undefined; call it "changed"
-    # if exactly one side is zero and "identical" if both are, rather than
-    # letting a 0/0 become a NaN that quietly poisons the mean below.
-    both_zero = (na < 1e-8) & (nb < 1e-8)
-    one_zero = ((na < 1e-8) ^ (nb < 1e-8))
-    cosine = dot / np.clip(na * nb, 1e-8, None)
-    distance = 1.0 - np.clip(cosine, -1.0, 1.0)
-    distance[both_zero] = 0.0
-    distance[one_zero] = 1.0
-    return distance
-
-
-def _heat(distance: np.ndarray) -> np.ndarray:
-    """Per-token distance as a black-to-amber tile, scaled to its own maximum.
-
-    Self-scaled on purpose: the absolute numbers are in the report, and what the
-    picture is for is *where* the change is, which a fixed scale hides whenever
-    an edit is subtle.
-    """
-    peak = float(distance.max())
-    norm = distance / peak if peak > 1e-8 else np.zeros_like(distance)
-    tile = np.zeros((*distance.shape, 3), dtype=np.float32)
-    tile[..., 0] = norm                       # red first
-    tile[..., 1] = np.clip(norm * 1.6 - 0.6, 0, 1)   # then green, giving amber
-    tile[..., 2] = np.clip(norm * 3.0 - 2.0, 0, 1)   # white only at the very top
-    return (tile * 255).astype(np.uint8)
 
 
 class TFCompareLevels(io.ComfyNode):
@@ -119,7 +80,7 @@ class TFCompareLevels(io.ComfyNode):
         tile_px = max(128, int(size) // 2)
         tiles, changed_per_level, peak = [], [], 0.0
         for level in range(before.num_levels):
-            distance = _per_token_distance(before.level(level), after.level(level))
+            distance = per_token_distance(before.level(level), after.level(level))
             changed = int((distance > CHANGED).sum())
             changed_per_level.append(changed)
             peak = max(peak, float(distance.max()))
@@ -128,7 +89,7 @@ class TFCompareLevels(io.ComfyNode):
                 f"{name:<18} {changed:>4} / {distance.size:<8} "
                 f"{distance.mean():>9.4f}  {distance.max():>9.4f}"
             )
-            tile = render.fit_to_grid(_heat(distance), distance.shape, tile_px)
+            tile = render.fit_to_grid(heat(distance), distance.shape, tile_px)
             tiles.append(render.caption(render.draw_ticks(tile, distance.shape), name))
 
         total = sum(changed_per_level)

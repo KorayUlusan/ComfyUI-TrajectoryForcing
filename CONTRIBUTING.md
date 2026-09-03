@@ -33,7 +33,7 @@ logic there and let `nodes_*.py` stay a thin schema-and-wiring layer.
 ## Tests
 
 ```bash
-pytest tests                      # 213 tests, no GPU, ~5 s
+pytest tests                      # 269 tests, no GPU, ~5 s
 sbatch slurm/gpu_smoke.sbatch     # the nodes against the real model
 sbatch slurm/server_smoke.sbatch  # the workflows through a real ComfyUI server
 sbatch slurm/measure_resources.sbatch   # the README's VRAM table
@@ -176,7 +176,7 @@ Reach for `auto_level_input` rather than a bare `Int.Input` with a `-1` default.
 
 Stock ComfyUI ships **no node that displays a STRING** — checked against every
 registered core class. So an `info` output is unreachable: forty-two text and
-number outputs across the four example workflows went nowhere, including
+number outputs across the example workflows went nowhere, including
 `TF Levels Info`, whose entire job is to report.
 
 Every node that computes a summary therefore renders it itself, through
@@ -267,7 +267,7 @@ behind when dragged.
 |---|---|
 | `README.md` | someone who knows ComfyUI and wants this extension |
 | `docs/GETTING-STARTED.md` | someone who has never opened ComfyUI |
-| `workflows/README.md` | tutorial for the four examples |
+| `workflows/README.md` | tutorial for the five examples |
 | `CONTRIBUTING.md` | this |
 | `PLAN.md` | design history, pivots, what the build found |
 

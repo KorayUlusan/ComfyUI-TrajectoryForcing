@@ -1,0 +1,178 @@
+{
+  "2": {
+    "class_type": "TFLoadPipeline",
+    "inputs": {
+      "checkpoint": "auto (download TF_L_edit)",
+      "config": "edit_env_config.yml",
+      "warmup": true
+    },
+    "_meta": {
+      "title": "TF Load Pipeline"
+    }
+  },
+  "3": {
+    "class_type": "TFGenerate",
+    "inputs": {
+      "pipeline": [
+        "2",
+        0
+      ],
+      "class_id": 213,
+      "seed": 592
+    },
+    "_meta": {
+      "title": "target \u2014 the image being edited"
+    }
+  },
+  "4": {
+    "class_type": "TFGenerate",
+    "inputs": {
+      "pipeline": [
+        "2",
+        0
+      ],
+      "class_id": 207,
+      "seed": 592
+    },
+    "_meta": {
+      "title": "source \u2014 where the new feature comes from"
+    }
+  },
+  "5": {
+    "class_type": "TFRegionMap",
+    "inputs": {
+      "levels": [
+        "3",
+        0
+      ],
+      "level": 2,
+      "cosine_threshold": 0.9,
+      "size": 512
+    },
+    "_meta": {
+      "title": "TF Region Map"
+    }
+  },
+  "6": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "5",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "the regions \u2014 pick coordinates from this"
+    }
+  },
+  "7": {
+    "class_type": "TFTokensFromCoords",
+    "inputs": {
+      "coords": "7,7",
+      "levels": [
+        "3",
+        0
+      ],
+      "regions": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "target region \u2014 WHERE the edit lands"
+    }
+  },
+  "8": {
+    "class_type": "TFTokensFromCoords",
+    "inputs": {
+      "coords": "6,6:9",
+      "levels": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "source tokens \u2014 WHAT gets written"
+    }
+  },
+  "9": {
+    "class_type": "TFSweep",
+    "inputs": {
+      "levels": [
+        "3",
+        0
+      ],
+      "target_tokens": [
+        "7",
+        0
+      ],
+      "source_tokens": [
+        "8",
+        0
+      ],
+      "axis": "seed",
+      "values": "592,593,594,595",
+      "level": [
+        "5",
+        3
+      ],
+      "seed": 592,
+      "strength": 1.0,
+      "source_mode": "region mean",
+      "baseline": true,
+      "decode": true,
+      "arm_limit": 12,
+      "output_arm": 0,
+      "size": 384,
+      "source_levels": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "TF Sweep Edit \u2014 the table is in this node"
+    }
+  },
+  "10": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "9",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "baseline first, then one frame per arm"
+    }
+  },
+  "11": {
+    "class_type": "TFCompareLevels",
+    "inputs": {
+      "before": [
+        "3",
+        0
+      ],
+      "after": [
+        "9",
+        2
+      ],
+      "size": 512,
+      "decode_difference": false
+    },
+    "_meta": {
+      "title": "TF Compare Levels"
+    }
+  },
+  "12": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "11",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "where the picked arm changed, per level"
+    }
+  }
+}
