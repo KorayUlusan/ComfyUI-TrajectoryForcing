@@ -16,6 +16,15 @@
 //     whole bet: the extension gains a convenience, never a dependency. Nothing
 //     here may ever become the only way to do something.
 //
+// When a TF Region Map is wired in, the node snaps whatever you picked to whole
+// cosine regions (`min_overlap=0.0` -- a typed coordinate is a deliberate pick,
+// not a rough stroke). The grid therefore has to select regions too, or it lies:
+// you click one cell, it says "1 token", and the node selects the forty that
+// share its region. The node hands its map back on `tf_regions` for exactly
+// this. Until the graph has run once there is no map to hand back, so the grid
+// starts token-wise and becomes region-wise after the first run -- the same
+// one-round-trip shape the Painter workflow already has.
+//
 // It is a DOM widget rather than a Vue component on purpose -- core's own
 // AUDIO_UI widget uses `addDOMWidget` unconditionally, so it renders under both
 // the classic and the Node 2.0 renderers. Painter's "Node 2.0 only" problem does
@@ -99,7 +108,36 @@ function buildGrid(node, coordsWidget) {
   status.append(count, clear);
 
   let mask = readCoords(coordsWidget.value, GRID, GRID);
+  let regions = null;   // {ids: number[][], level, num_regions}, once the node has run
   const cells = [];
+
+  // Every cell sharing a region id with (row, col). One click on a region-mapped
+  // grid picks the whole thing, which is the paper's R_tgt -- a semantic part,
+  // not an arbitrary set of tokens.
+  const regionOf = (row, col) => {
+    if (!regions?.ids?.[row]) return [[row, col]];
+    const id = regions.ids[row][col];
+    const out = [];
+    for (let r = 0; r < GRID; r++) {
+      for (let c = 0; c < GRID; c++) if (regions.ids[r]?.[c] === id) out.push([r, c]);
+    }
+    return out;
+  };
+
+  // A cell edge is a region edge when its neighbour has a different id. Drawn on
+  // the grid so a region can be seen before it is clicked, matching the yellow
+  // boundaries on TF Region Map's own preview.
+  const edges = (row, col) => {
+    if (!regions?.ids?.[row]) return "";
+    const id = regions.ids[row][col];
+    const differs = (r, c) => regions.ids[r]?.[c] !== undefined && regions.ids[r][c] !== id;
+    const sides = [];
+    if (row === 0 || differs(row - 1, col)) sides.push("inset 0 1px 0 0 #ffd664");
+    if (col === 0 || differs(row, col - 1)) sides.push("inset 1px 0 0 0 #ffd664");
+    if (row === GRID - 1 || differs(row + 1, col)) sides.push("inset 0 -1px 0 0 #ffd664");
+    if (col === GRID - 1 || differs(row, col + 1)) sides.push("inset -1px 0 0 0 #ffd664");
+    return sides.join(", ");
+  };
 
   const paint = () => {
     let selected = 0;
@@ -109,14 +147,19 @@ function buildGrid(node, coordsWidget) {
         if (on) selected++;
         const cell = cells[row * GRID + col];
         cell.style.background = on ? "#ff5050" : "#151d2e";
-        // Every fourth line, so the grid is countable the same way the previews
-        // are -- the tick labels there are on the same interval.
+        // Region boundaries first, because they are what a click follows; the
+        // grid rule is only a ruler. Every fourth line, matching the tick labels
+        // on the previews.
+        const boundary = edges(row, col);
         const rule = row % TICK_EVERY === 0 || col % TICK_EVERY === 0;
-        cell.style.boxShadow = on ? "inset 0 0 0 1px #ffb0b0"
-          : rule ? "inset 0 0 0 1px #33415c" : "none";
+        cell.style.boxShadow = boundary || (on ? "inset 0 0 0 1px #ffb0b0"
+          : rule ? "inset 0 0 0 1px #33415c" : "none");
       }
     }
-    count.textContent = `${selected} token${selected === 1 ? "" : "s"}`;
+    const tokens = `${selected} token${selected === 1 ? "" : "s"}`;
+    count.textContent = regions
+      ? `${tokens} · ${regions.num_regions} regions at level ${regions.level}`
+      : tokens;
   };
 
   const commit = () => {
@@ -137,7 +180,7 @@ function buildGrid(node, coordsWidget) {
   for (let row = 0; row < GRID; row++) {
     for (let col = 0; col < GRID; col++) {
       const cell = document.createElement("div");
-      cell.title = `${row},${col}`;
+      cell.title = `${row},${col}`;   // updated once a region map arrives
       cell.style.cursor = "pointer";
       cells.push(cell);
       board.append(cell);
@@ -154,13 +197,27 @@ function buildGrid(node, coordsWidget) {
   // capture changes event routing, not hit-testing.
   const cellAt = (x, y) => cells.indexOf(document.elementFromPoint(x, y));
 
+  // `wholeRegion` is off when a modifier is held (alt is option on a Mac), so a
+  // single coordinate stays writable even on a region-mapped grid. Note what
+  // this does and does not do: the node snaps with min_overlap=0.0, so the
+  // *selection* is the whole region either way. What this controls is the
+  // `coords` text -- "7,7" is a better line in a writeup than a nine-run
+  // coordinate list, and it says which region was meant without ambiguity.
+  // Unwire `regions` if you actually want sub-region tokens.
+  let wholeRegion = true;
+
   const applyAt = (index) => {
     if (index < 0) return;
     const row = Math.floor(index / GRID);
     const col = index % GRID;
-    if (mask[row][col] === dragTo) return;
-    mask[row][col] = dragTo;
-    paint();
+    const targets = wholeRegion ? regionOf(row, col) : [[row, col]];
+    let changed = false;
+    for (const [r, c] of targets) {
+      if (mask[r][c] === dragTo) continue;
+      mask[r][c] = dragTo;
+      changed = true;
+    }
+    if (changed) paint();
   };
 
   board.addEventListener("pointerdown", (event) => {
@@ -169,6 +226,7 @@ function buildGrid(node, coordsWidget) {
     event.preventDefault();
     event.stopPropagation();   // keep it off the canvas, or the node is dragged
     dragging = true;
+    wholeRegion = !(event.altKey || event.ctrlKey || event.metaKey);
     dragTo = !mask[Math.floor(index / GRID)][index % GRID];
     applyAt(index);
     board.setPointerCapture?.(event.pointerId);
@@ -204,7 +262,28 @@ function buildGrid(node, coordsWidget) {
   paint();
 
   // Typing into the text field is still first-class, so the grid follows it.
-  return { root, resync: () => { mask = readCoords(coordsWidget.value, GRID, GRID); paint(); } };
+  return {
+    root,
+    resync: () => { mask = readCoords(coordsWidget.value, GRID, GRID); paint(); },
+    // The node hands its region map back after each run. Shape-check it rather
+    // than trusting it: a different checkpoint could use a different grid, and
+    // a half-applied map would draw boundaries that are not there.
+    setRegions: (payload) => {
+      const ids = payload?.ids;
+      const usable = Array.isArray(ids) && ids.length === GRID
+        && ids.every((r) => Array.isArray(r) && r.length === GRID);
+      regions = usable ? payload : null;
+      for (let row = 0; row < GRID; row++) {
+        for (let col = 0; col < GRID; col++) {
+          cells[row * GRID + col].title = regions
+            ? `${row},${col} — region ${regions.ids[row][col]} `
+              + `(alt/option-click to write just this coordinate)`
+            : `${row},${col}`;
+        }
+      }
+      paint();
+    },
+  };
 }
 
 app.registerExtension({
@@ -218,7 +297,7 @@ app.registerExtension({
         const coords = this.widgets?.find((w) => w.name === "coords");
         if (!coords) return result;      // schema changed; leave typing alone
 
-        const { root, resync } = buildGrid(this, coords);
+        const { root, resync, setRegions } = buildGrid(this, coords);
         const widget = this.addDOMWidget("tf_token_grid", "div", root, {
           hideOnZoom: false,
           getMinHeight: () => 210,
@@ -233,6 +312,20 @@ app.registerExtension({
         coords.callback = function (...args) {
           const out = previous?.apply(this, args);
           resync();
+          return out;
+        };
+        // `onExecuted` is how a node receives its own `ui` payload back -- the
+        // same hook core's AUDIO_UI widget uses. It is what carries the region
+        // map, and it is a public, long-standing API rather than a store
+        // internal, which matters for a file that has to keep working.
+        const onExecuted = this.onExecuted;
+        this.onExecuted = function (message) {
+          const out = onExecuted?.apply(this, arguments);
+          try {
+            setRegions(message?.tf_regions?.[0] ?? null);
+          } catch (error) {
+            console.error("[TrajectoryForcing] region map unusable:", error);
+          }
           return out;
         };
         // Loading a saved workflow sets widget values without firing callbacks.

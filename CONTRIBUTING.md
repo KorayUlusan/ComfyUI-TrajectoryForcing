@@ -34,7 +34,7 @@ logic there and let `nodes_*.py` stay a thin schema-and-wiring layer.
 ## Tests
 
 ```bash
-pytest tests                      # 309 tests, no GPU, ~5 s
+pytest tests                      # 347 tests, no GPU, ~5 s
 sbatch slurm/gpu_smoke.sbatch     # the nodes against the real model
 sbatch slurm/server_smoke.sbatch  # the workflows through a real ComfyUI server
 sbatch slurm/measure_resources.sbatch   # the README's VRAM table

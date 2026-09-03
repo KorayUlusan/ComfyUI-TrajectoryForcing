@@ -94,13 +94,24 @@ SHIPPED_LEVELS = 4
 
 
 def level_input(id: str = "level", default: int = 2, tooltip: str = "") -> io.Int.Input:
+    """A level a person picks, so it stops where the model does.
+
+    This used to run to MAX_LEVELS - 1 = 15, and anything above 3 was silently
+    clamped -- a slider three quarters of which did nothing, which is the same
+    dead-knob shape the `which` + `level` pair had. Four levels is a property of
+    the method rather than a per-run setting, so the widget says so.
+
+    The advanced `-1 = auto` widgets keep the wider range on purpose: addressing
+    a model deeper than any released one is their whole documented reason to
+    exist, and being hidden behind the advanced toggle they mislead nobody.
+    """
     return io.Int.Input(
         id,
         default=default,
         min=0,
-        max=MAX_LEVELS - 1,
-        tooltip=tooltip or "Hierarchy level, 0 = coarsest (object/background). "
-                          "Clamped to the model's level count.",
+        max=SHIPPED_LEVELS - 1,
+        tooltip=tooltip or f"Hierarchy level, 0 = coarsest (object/background) to "
+                           f"{SHIPPED_LEVELS - 1} = finest.",
     )
 
 

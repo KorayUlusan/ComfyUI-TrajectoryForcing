@@ -190,7 +190,7 @@ what was painted back down to tokens.
 | **TF Level Canvas** | One level as a 512px canvas: PCA latent or decoded RGB, with the token grid, region boundaries, and an existing selection drawn on. Feed it to Painter. |
 | **TF Region Map** | Clusters a level's tokens into connected regions by cosine similarity. These are the *R* in the paper's edits. The threshold sets granularity — 0.9 gives ~50 regions over 256 tokens at level 2. Its `level` output is worth wiring into the edit node, so the two cannot drift apart. |
 | **TF Tokens From Mask** | Painted mask → token selection. A token counts once enough of its footprint is painted, so a stroke clipping a corner does not overwrite that token's whole feature vector. Wire a region map in to snap a rough stroke to whole regions. |
-| **TF Tokens From Coords** | **Click a 16×16 grid on the node**, or type `row,col` pairs (`7,6:9` is a run) — the grid writes into the text field, so both are the same value and either way the selection stays a text string you can paste into a writeup. That is what a brush stroke cannot give you. |
+| **TF Tokens From Coords** | **Click a 16×16 grid on the node**, or type `row,col` pairs (`7,6:9` is a run) — the grid writes into the text field, so both are the same value and either way the selection stays a text string you can paste into a writeup. Wire a region map in and one click takes the whole region, with the boundaries drawn on the grid; alt-click (option on a Mac) writes just that one coordinate, which is what a writeup wants — though with a map wired the node still snaps to the whole region either way. |
 | **TF Tokens Combine** | Union / intersection / difference / invert, to build a region up from several strokes. |
 | **TF Tokens Preview** | Draw a selection on its own, to check what a mask resolved to. |
 
@@ -244,9 +244,12 @@ selection snapped to one level's regions is not a whole region at another. The
 node keeps the **token set** fixed, which is what "the same edit at every level"
 has to mean, and says so in the report rather than refusing.
 
-It sweeps a *feature* edit. A shape edit is bound to one level's region map, so
-there is no meaningful axis to sweep it along except the seed; use TF Shape Edit
-with the explicit chain.
+It sweeps a **feature** edit by default. Wire a *TF Region Map* into `regions`
+and it sweeps a **shape** edit instead — `target_tokens` are handed to the region
+named by `source_tokens`, taking that whole region's mean. The map describes one
+level, so `seed` and `strength` are available and `level (l*)` is refused with
+that reason; everything else about the loop, including the per-arm baseline and
+the spread, is identical.
 
 **Most nodes need no `pipeline` wire.** A trajectory carries the pipeline that
 produced it, so TF Decode, TF Latent Preview, TF Level Canvas, TF Resume and TF

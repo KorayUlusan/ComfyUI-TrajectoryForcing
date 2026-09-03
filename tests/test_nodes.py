@@ -462,10 +462,16 @@ class TestEditNodes:
         np.testing.assert_allclose(out.level(2)[0, 0], expected, rtol=1e-6)
 
     def test_feature_edit_rejects_an_empty_target(self, node_classes, levels):
+        # Built directly, not through TF Tokens From Coords, which now stops the
+        # graph on an empty selection. The guard here still matters: TF Tokens
+        # Combine can hand over an empty one (intersect two disjoint picks), and
+        # the edit must refuse it rather than write nothing and claim success.
+        from tf_nodes.data import TokenSelection
+
         with pytest.raises(ValueError, match="empty"):
             node(node_classes, "TFFeatureEdit").execute(
                 levels=levels, level=2,
-                target_tokens=self._tokens(node_classes, levels, ""),
+                target_tokens=TokenSelection(mask=np.zeros(levels.grid, dtype=bool)),
                 source_tokens=self._tokens(node_classes, levels, "5,5"),
                 source_mode="region mean", strength=1.0, source_level=2, source_levels=None,
             )
@@ -1047,7 +1053,9 @@ class TestSweepEdit:
         assert "snapped to level 1's regions" in report
 
     def test_an_empty_selection_is_refused(self, node_classes, levels):
-        empty, _, _ = node(node_classes, "TFTokensFromCoords").execute(coords="", levels=levels)
+        from tf_nodes.data import TokenSelection
+
+        empty = TokenSelection(mask=np.zeros(levels.grid, dtype=bool))
         source, _, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="5,5", levels=levels)
         with pytest.raises(ValueError, match="target_tokens is empty"):
@@ -1490,3 +1498,193 @@ class TestSeveralFramesArriveAsOneImage:
             assert widget is not None, f"{node_id} has no sheet_layout"
             assert widget.options[0] == "contact sheet", f"{node_id} defaults to a batch"
             assert widget.advanced, f"{node_id} shows sheet_layout by default"
+
+
+class TestSweepingAShapeEdit:
+    """The sweep covers shape edits too, over the axes that mean something.
+
+    The docs used to say a shape edit had "no meaningful axis but the seed" and
+    then not offer the seed either -- a sentence conceding the case it went on
+    to refuse. Seeds and strengths are both well defined; only l* is not,
+    because a region map describes exactly one level.
+    """
+
+    KW = dict(
+        axis="seed", values="1,2", level=1, seed=7, strength=1.0,
+        source_mode="region mean", baseline=True, decode=True, arm_limit=12,
+        output_arm=0, sheet_layout="contact sheet", size=128, source_levels=None,
+    )
+
+    @pytest.fixture
+    def setup(self, node_classes, two_region_levels, pipeline):
+        from dataclasses import replace
+
+        levels = replace(two_region_levels, pipeline=pipeline)
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+            levels=levels, level=1, cosine_threshold=0.9, size=128)
+        # two_region_levels splits into a left and a right half at every level
+        left, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=levels)
+        right, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords=f"0,{GRID - 1}", levels=levels)
+        return levels, regions, left, right
+
+    def run(self, node_classes, setup, **overrides):
+        levels, regions, left, right = setup
+        kwargs = {**self.KW, "regions": regions, "target_tokens": left,
+                  "source_tokens": right}
+        kwargs.update(overrides)
+        return node(node_classes, "TFSweep").execute(levels=levels, **kwargs)
+
+    def test_a_shape_edit_sweeps_over_seeds(self, node_classes, setup):
+        report, _, _, arms, _ = self.run(node_classes, setup, values="1,2,3")
+        assert arms == 3
+        assert "edit:   shape" in report, report
+
+    def test_it_sweeps_over_strength_too(self, node_classes, setup):
+        _, _, _, arms, _ = self.run(node_classes, setup, axis="strength", values="0.5,1.0")
+        assert arms == 2
+
+    def test_the_receiving_region_supplies_the_feature_not_the_named_token(
+            self, node_classes, setup):
+        # A shape edit must not change what the region looks like, so f_src is
+        # the mean of the *whole* receiving region.
+        levels, regions, left, right = setup
+        _, _, out, _, _ = self.run(node_classes, setup, values="1")
+        expected = levels.level(1)[regions.mask_for(
+            sorted({regions.region_of(r, c) for r, c in right.coords}))].mean(axis=0)
+        np.testing.assert_allclose(out.level(1)[0, 0], expected, rtol=1e-5)
+
+    def test_sweeping_l_star_is_refused_with_the_reason(self, node_classes, setup):
+        with pytest.raises(ValueError, match="cannot be swept over"):
+            self.run(node_classes, setup, axis="level (l*)", values="0-2")
+
+    def test_one_region_on_both_sides_is_refused(self, node_classes, setup):
+        levels, regions, left, _ = setup
+        with pytest.raises(ValueError, match="two different regions"):
+            self.run(node_classes, setup, source_tokens=left)
+
+    def test_a_cross_trajectory_source_is_refused_as_meaningless(self, node_classes, setup):
+        levels, _, _, _ = setup
+        with pytest.raises(ValueError, match="means nothing for a shape edit"):
+            self.run(node_classes, setup, source_levels=levels)
+
+    def test_a_region_map_from_another_level_is_refused(self, node_classes, setup):
+        with pytest.raises(ValueError, match="but this sweep edits level"):
+            self.run(node_classes, setup, level=2)
+
+    def test_unwiring_regions_is_still_a_feature_edit(self, node_classes, setup):
+        report, _, _, _, _ = self.run(node_classes, setup, regions=None)
+        assert "edit:   feature" in report
+
+
+class TestTheGridIsToldAboutRegions:
+    """The clickable grid has to select what the node actually selects.
+
+    TF Tokens From Coords snaps to whole regions with `min_overlap=0.0` whenever
+    a map is wired -- the default in workflows 02 and 05 -- so a grid that
+    highlights the single cell you clicked is wrong by forty tokens, and its
+    count is wrong every time. The node hands its map back on `tf_regions` so
+    `web/tf_token_grid.js` can select regions too. Only the payload is testable
+    here; the widget that consumes it needs a browser.
+    """
+
+    def payload(self, out) -> dict | None:
+        ui = out.ui.as_dict() if hasattr(out.ui, "as_dict") else (out.ui or {})
+        got = ui.get("tf_regions")
+        return got[0] if got else None
+
+    def test_no_region_map_means_no_payload(self, node_classes, levels):
+        # Nothing to say, and an empty key would make the widget draw
+        # boundaries that are not there.
+        out = node(node_classes, "TFTokensFromCoords").execute(coords="1,1", levels=levels)
+        assert self.payload(out) is None
+
+    def test_the_map_is_handed_back_when_one_is_wired(
+            self, node_classes, two_region_levels):
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+            levels=two_region_levels, level=2, cosine_threshold=0.9, size=128)
+        out = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=two_region_levels, regions=regions)
+        payload = self.payload(out)
+        assert payload is not None
+        assert payload["level"] == 2
+        assert payload["num_regions"] == 2
+
+    def test_the_ids_match_the_map_exactly(self, node_classes, two_region_levels):
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+            levels=two_region_levels, level=2, cosine_threshold=0.9, size=128)
+        out = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=two_region_levels, regions=regions)
+        np.testing.assert_array_equal(
+            np.array(self.payload(out)["ids"]), regions.ids)
+
+    def test_it_is_plain_json(self, node_classes, two_region_levels):
+        # It crosses the websocket; a numpy array would not survive.
+        import json
+
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+            levels=two_region_levels, level=2, cosine_threshold=0.9, size=128)
+        out = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=two_region_levels, regions=regions)
+        assert json.loads(json.dumps(self.payload(out))) == self.payload(out)
+
+    def test_the_node_still_shows_its_own_text(self, node_classes, two_region_levels):
+        # The payload is added beside the preview, never instead of it.
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+            levels=two_region_levels, level=2, cosine_threshold=0.9, size=128)
+        out = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=two_region_levels, regions=regions)
+        assert "tokens selected" in ui_text(out)
+
+    def test_the_payload_describes_what_was_actually_selected(
+            self, node_classes, two_region_levels):
+        # The whole point: one clicked cell becomes a whole region, and the
+        # grid must be able to work that out from what it is given.
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+            levels=two_region_levels, level=2, cosine_threshold=0.9, size=128)
+        selection, count, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=two_region_levels, regions=regions)
+        ids = np.array(self.payload(node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=two_region_levels, regions=regions))["ids"])
+        assert count > 1, "a region is more than the token that named it"
+        np.testing.assert_array_equal(selection.mask, ids == ids[0, 0])
+
+
+class TestNothingPickedStopsTheGraph:
+    """An empty coordinate field is "not done yet", not a crash.
+
+    Clearing the grid used to let an empty selection travel two nodes downstream
+    and raise out of TF Feature Edit, which reaches the user as a raw traceback
+    in a modal. TF Tokens From Mask already had the right shape for this; the
+    coords node now matches it.
+    """
+
+    def blocked(self, out) -> bool:
+        from comfy_execution.graph_utils import ExecutionBlocker
+
+        return all(isinstance(value, ExecutionBlocker) for value in out)
+
+    def test_an_empty_field_stops_the_graph(self, node_classes, levels):
+        out = node(node_classes, "TFTokensFromCoords").execute(coords="", levels=levels)
+        assert self.blocked(out), "every declared output needs its own blocker"
+
+    def test_whitespace_counts_as_empty(self, node_classes, levels):
+        out = node(node_classes, "TFTokensFromCoords").execute(coords="   \n ", levels=levels)
+        assert self.blocked(out)
+
+    def test_it_says_what_to_do_in_its_own_body(self, node_classes, levels):
+        out = node(node_classes, "TFTokensFromCoords").execute(coords="", levels=levels)
+        shown = ui_text(out)
+        assert "Click the grid" in shown
+        assert "7,7" in shown, "and how to type one, for anyone without the widget"
+
+    def test_the_reason_survives_a_cached_re_run(self, node_classes):
+        # Without has_intermediate_output the notice shows once and is gone the
+        # next time, when the node is served from cache.
+        assert node(node_classes, "TFTokensFromCoords").define_schema().has_intermediate_output
+
+    def test_a_real_selection_is_unaffected(self, node_classes, levels):
+        selection, count, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="7,7", levels=levels)
+        assert count == 1 and selection.count == 1

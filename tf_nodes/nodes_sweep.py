@@ -6,9 +6,11 @@ hand means duplicating the edit-and-resume chain once per arm, re-typing the
 coordinates each time, and then comparing four previews by eye -- at which point
 the tool is a slower demo rather than a faster experiment.
 
-This node is the whole chain (feature edit -> resume -> measure) run once per
-value, with everything else pinned. Two things make it an experiment tool rather
-than a batch button:
+This node is the whole chain (edit -> resume -> measure) run once per value,
+with everything else pinned. Wiring a region map in makes the edit a *shape*
+edit instead of a feature edit; both reduce to the same primitive and differ
+only in where f_src comes from, so the loop around them is identical. Two things
+make it an experiment tool rather than a batch button:
 
 * **Every arm is measured against its own baseline** -- the same trajectory
   resumed from the same level with the same seed and *no* edit. Without that,
@@ -18,8 +20,10 @@ than a batch button:
   all is the first thing a table wants to say, and it is the one number no
   amount of staring at a contact sheet gives you.
 
-TF Feature Edit and TF Resume From Level keep their full surface; this trades
-some of it (a fixed source level, no shape edit) for the loop.
+TF Feature Edit, TF Shape Edit and TF Resume From Level keep their full surface;
+this trades some of it (a fixed source level) for the loop. A shape edit cannot
+be swept over l*, because its region map describes exactly one level -- seed and
+strength are both fine, and that is the whole of the restriction.
 """
 from __future__ import annotations
 
@@ -33,6 +37,7 @@ from .nodes_edit import SOURCE_MODES
 from .sockets import (
     CATEGORY_EDIT,
     TFLevelsSocket,
+    TFRegionsSocket,
     TFTokensSocket,
     level_input,
     node_preview,
@@ -54,8 +59,10 @@ class TFSweep(io.ComfyNode):
             category=CATEGORY_EDIT,
             has_intermediate_output=True,
             description=(
-                "Run one feature edit once per value of a single axis -- a seed list, the levels, "
-                "or a strength ramp -- and tabulate the result.\n\n"
+                "Run one edit once per value of a single axis -- a seed list, the levels, or a "
+                "strength ramp -- and tabulate the result.\n\n"
+                "Feature edit by default. Wire a TF Region Map into 'regions' to sweep a shape "
+                "edit instead, over seed or strength (its map describes one level, so not l*).\n\n"
                 "Each arm is compared against the same trajectory resumed with the same seed and "
                 "no edit, so the number is the edit's effect rather than the seed's. The report "
                 "also gives the spread across arms: how much the axis moves the outcome at all.\n\n"
@@ -127,7 +134,15 @@ class TFSweep(io.ComfyNode):
                 TFLevelsSocket.Input(
                     "source_levels", optional=True,
                     tooltip="Take the source feature from a different trajectory. Unwired means "
-                            "the same one.",
+                            "the same one. Feature edits only.",
+                ),
+                TFRegionsSocket.Input(
+                    "regions", optional=True,
+                    tooltip="Wire a TF Region Map to sweep a *shape* edit instead: "
+                            "'target_tokens' are handed over to the region named by "
+                            "'source_tokens', taking that whole region's mean feature. The map "
+                            "belongs to one level, so only the seed and strength axes are "
+                            "available.",
                 ),
                 pipeline_input(),
             ],
@@ -152,13 +167,18 @@ class TFSweep(io.ComfyNode):
     @classmethod
     def execute(cls, levels, target_tokens, source_tokens, axis, values, level, seed,
                 strength, source_mode, baseline, decode, arm_limit, output_arm,
-                sheet_layout, size, source_levels=None, pipeline=None) -> io.NodeOutput:
+                sheet_layout, size, source_levels=None, regions=None,
+                pipeline=None) -> io.NodeOutput:
         pipe = resolve_pipeline(pipeline, levels, "TF Sweep Edit")
         arms = sweep.plan(
             axis, values, level=level, seed=seed, strength=strength,
             num_levels=levels.num_levels, limit=arm_limit,
         )
 
+        shape_edit = regions is not None
+        if shape_edit:
+            _check_shape_edit(levels, regions, axis, level, target_tokens,
+                              source_tokens, source_levels)
         source_stack = source_levels if source_levels is not None else levels
         target_tokens.check_grid(levels.grid, "target_tokens")
         target_tokens.require_nonempty("target_tokens")
@@ -179,8 +199,8 @@ class TFSweep(io.ComfyNode):
         baselines: dict[tuple[int, int], np.ndarray] = {}
         results, rows, finals = [], [], []
         for arm in arms:
-            feature = tokens.source_feature(
-                source_stack.level(arm.level), source_tokens, source_mode)
+            feature = _feature(levels, source_stack, arm, source_tokens,
+                               source_mode, regions)
             canvas = tokens.write_feature(
                 levels.level(arm.level), target_tokens, feature, arm.strength)
             edited = levels.with_level(arm.level, canvas, f"sweep arm: {arm.describe()}")
@@ -214,6 +234,7 @@ class TFSweep(io.ComfyNode):
         report = _report(
             axis, arms, rows, spread, levels, target_tokens, source_tokens,
             source_levels, source_mode, picked, int(output_arm), baseline, caveat,
+            regions,
         )
         sheet = _sheet(
             pipe, levels, arms, results, baselines.get((arms[0].level, arms[0].seed)),
@@ -236,6 +257,63 @@ class TFSweep(io.ComfyNode):
         )
 
 
+def _check_shape_edit(levels, regions, axis, level, target_tokens, source_tokens,
+                      source_levels) -> None:
+    """What a shape edit needs that a feature edit does not.
+
+    The README used to say a shape edit had "no meaningful axis but the seed"
+    and then not offer the seed either -- a sentence conceding the case it went
+    on to refuse. Seeds and strengths are both well defined here; only l* is
+    not, because the region map describes exactly one level.
+    """
+    if axis == sweep.LEVEL:
+        raise ValueError(
+            "A shape edit cannot be swept over l*: the region map wired into 'regions' "
+            f"describes level {regions.level} only, and the boundaries are different at "
+            "every other level. Sweep 'seed' or 'strength', or unwire 'regions' for a "
+            "feature edit."
+        )
+    if source_levels is not None:
+        raise ValueError(
+            "'source_levels' is a feature edit's cross-trajectory source and means nothing "
+            "for a shape edit -- the receiving region is by definition in this trajectory. "
+            "Unwire one of them."
+        )
+    if regions.ids.shape != levels.grid:
+        raise ValueError(
+            f"Region map is {regions.ids.shape} but the token grid is {levels.grid}."
+        )
+    index = levels.clamp(level)
+    if regions.level != index:
+        raise ValueError(
+            f"Region map was built on level {regions.level} but this sweep edits level "
+            f"{index}. Point TF Region Map at the same level, or wire its 'level' output "
+            "into 'level' so the two cannot disagree."
+        )
+    donor = sorted({regions.region_of(r, c) for r, c in target_tokens.coords})
+    receiving = sorted({regions.region_of(r, c) for r, c in source_tokens.coords})
+    if set(donor) == set(receiving):
+        raise ValueError(
+            f"target_tokens and source_tokens are both inside region(s) {receiving}; "
+            "a shape edit needs two different regions."
+        )
+
+
+def _feature(levels, source_stack, arm, source_tokens, source_mode, regions):
+    """What gets written into the target tokens, for whichever edit this is.
+
+    Both reduce to the paper's one primitive and differ only here: a feature
+    edit takes f_src from a source selection, a shape edit from the *whole*
+    region absorbing the tokens -- the whole region, not the tokens naming it,
+    because a shape edit must not also change what the region looks like.
+    """
+    if regions is None:
+        return tokens.source_feature(source_stack.level(arm.level), source_tokens, source_mode)
+    canvas = levels.level(arm.level)
+    receiving = sorted({regions.region_of(r, c) for r, c in source_tokens.coords})
+    return canvas[regions.mask_for(receiving)].mean(axis=0, keepdims=True)
+
+
 def _level_caveat(target, source) -> str:
     """What a level sweep does to a region-snapped selection, stated once."""
     bound = sorted({s.level for s in (target, source) if s.level is not None})
@@ -250,7 +328,7 @@ def _level_caveat(target, source) -> str:
 
 
 def _report(axis, arms, rows, spread, levels, target, source, source_levels,
-            source_mode, picked, asked, baseline, caveat) -> str:
+            source_mode, picked, asked, baseline, caveat, regions=None) -> str:
     """The table, and enough of the setup to read it a month later."""
     origin = "same trajectory" if source_levels is None else f"class {source_levels.class_id}"
     pinned = {
@@ -261,8 +339,13 @@ def _report(axis, arms, rows, spread, levels, target, source, source_levels,
     lines = [
         f"sweep {axis} = {', '.join(f'{a.value:g}' for a in arms)}   ({len(arms)} arms)",
         f"pinned: {pinned}, class {levels.class_id}",
-        f"edit:   {target.count} target tokens <- {source_mode} of {source.count} "
-        f"source tokens ({origin})",
+        (
+            f"edit:   shape -- {target.count} tokens handed to the region named by "
+            f"{source.count} token(s), taking that region's mean"
+            if regions is not None else
+            f"edit:   feature -- {target.count} target tokens <- {source_mode} of "
+            f"{source.count} source tokens ({origin})"
+        ),
         (
             "measured against: the same trajectory resumed identically without the edit, one "
             "baseline per arm"

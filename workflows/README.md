@@ -79,10 +79,20 @@ time. A selection carries the level whose regions it was snapped to, and the
 edit nodes refuse it at any other — the token grid is the same size at every
 level, so otherwise the edit lands on the wrong region silently.
 
-**The coordinates.** The node carries a clickable 16×16 grid — click a cell,
-or drag across several — and it writes the coordinates into the text field
-below it, so you never have to count cells. Typing still works and the two stay
-in step. Selections are `row,col` on the **16×16 token grid**.
+**The coordinates.** The node carries a clickable 16×16 grid — click a cell, or
+drag across several — and it writes the coordinates into the text field below
+it, so you never have to count cells. Typing still works and the two stay in
+step. Selections are `row,col` on the **16×16 token grid**.
+
+The *target region* node has a region map wired in, so **one click takes the
+whole region**, and the grid draws the yellow boundaries you see on the region
+map preview. It learns those from the previous run — on a graph that has never
+run there is no map yet, so the first click picks a single token and the node
+expands it for you. **Alt-click** — option-click on a Mac — writes just that one coordinate. It
+does *not* narrow the selection: with a map wired the node snaps to whole
+regions either way. What it gives you is `7,7` in the text field instead of a
+nine-run coordinate list, which is the line you want in a writeup. Unwire
+*regions* from the node if you actually want sub-region tokens.
 `7,7` is the middle. `6,6:9` means row 6, columns 6 through 9. The *target
 region* input has the region map wired into it, so a single coordinate expands
 to the whole region containing it; the *source tokens* input does not, so it
@@ -263,9 +273,12 @@ makes the table readable a month later.
 > coordinates rather than a snapped selection if you want the token set to be
 > exactly what you chose.
 
-It sweeps a *feature* edit. A shape edit is bound to one level's region map, so
-the only axis that means anything for it is the seed; wire *TF Shape Edit* into
-the explicit chain for that.
+**It sweeps shape edits too.** Wire a *TF Region Map* into `regions` and the
+edit becomes the one from workflow 04: the target tokens are handed to the
+region named by the source tokens. `seed` and `strength` both work; `level (l*)`
+is refused, because a region map describes exactly one level and the boundaries
+are somewhere else at every other. "Was that the boundary move, or the seed?" is
+the same question as before and gets the same answer.
 
 ---
 

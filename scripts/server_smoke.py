@@ -259,6 +259,25 @@ def main() -> int:
             f"{len(edited_files)} distinct preview images from the edit workflow",
         )
 
+        # --- the region map reaches the grid widget --------------------------
+        # TF Tokens From Coords snaps to whole regions when a map is wired, so
+        # its clickable grid has to select regions too or it highlights one cell
+        # while the node takes forty. The map travels on `tf_regions`. Only a
+        # browser can prove the widget uses it; this proves it arrives.
+        coords_out = json.dumps(entries.get("02-feature-edit-coords", {}).get("outputs", {}))
+        payload = [
+            out for out in entries.get("02-feature-edit-coords", {}).get("outputs", {}).values()
+            if out.get("tf_regions")
+        ]
+        grid = payload[0]["tf_regions"][0] if payload else {}
+        ids = grid.get("ids") or []
+        check(
+            "the region map reaches the token grid",
+            len(ids) == 16 and all(len(row) == 16 for row in ids) and grid.get("num_regions", 0) > 1,
+            f"16x16 ids, {grid.get('num_regions')} regions at level {grid.get('level')}"
+            if ids else f"no tf_regions in {coords_out[:300]}",
+        )
+
         # --- 4. the sweep's table reaches the client --------------------------
         sweep_said = json.dumps(entries.get("05-sweep-seeds", {}).get("outputs", {}))
         arms_named = [s for s in ("592", "593", "594", "595") if s in sweep_said]

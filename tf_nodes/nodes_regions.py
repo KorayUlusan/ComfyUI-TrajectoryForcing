@@ -260,6 +260,14 @@ class TFTokensFromCoords(io.ComfyNode):
                 "too -- 'row,col' pairs, with 'row,col0:col1' for a run -- and the two stay in "
                 "step, because the clickable grid writes into the text field rather than replacing "
                 "it.\n\n"
+                "With a region map wired in, one click takes the whole region -- the paper's "
+                "R_tgt, a semantic part rather than an arbitrary set of tokens -- and the grid "
+                "draws the boundaries. It learns them from the first run, so before that a click "
+                "picks one token and the node expands it.\n\n"
+                "Alt-click (option on a Mac) writes just that one coordinate. It does not "
+                "narrow the selection -- with a map wired the node snaps to whole regions "
+                "either way -- but '7,7' is a better line in a writeup than a nine-run "
+                "coordinate list. Unwire 'regions' for genuinely sub-region tokens.\n\n"
                 "Either way the selection ends up as text you can paste into a writeup, which is "
                 "what a brush stroke cannot give you and what a written-up experiment needs."
             ),
@@ -297,8 +305,29 @@ class TFTokensFromCoords(io.ComfyNode):
             # Any overlap at all expands the region: a typed coordinate is a
             # deliberate pick of one token, not a rough stroke to be thresholded.
             selection = token_ops.snap_to_regions(selection, regions, 0.0)
+        if selection.count == 0:
+            # The same quiet stop as TF Tokens From Mask, for the same reason: an
+            # empty selection is not an error here, it is "nothing picked yet".
+            # Left to travel downstream it surfaces two nodes later as a raw
+            # traceback out of TF Feature Edit, which reads as a crash rather
+            # than as something the user has not done. One ExecutionBlocker per
+            # declared output and never a message-carrying one -- see
+            # TFTokensFromMask for why that route is the wrong one.
+            stop = ExecutionBlocker(None)
+            return io.NodeOutput(stop, stop, stop,
+                                 ui=node_preview(text=_nothing_selected()))
         info = _describe(selection)
-        return io.NodeOutput(selection, selection.count, info, ui=node_preview(text=info))
+        # Hand the region map back to this node's own clickable grid, so what it
+        # highlights is what the node actually selected. Without this the widget
+        # shows the one token you clicked while the snap above quietly expands it
+        # to the whole region -- often forty tokens -- and the count beside the
+        # grid is wrong every time a map is wired in, which is the default in
+        # workflows 02 and 05. Read back in web/tf_token_grid.js via onExecuted;
+        # a 16x16 grid of small ints is about a kilobyte of JSON.
+        return io.NodeOutput(
+            selection, selection.count, info,
+            ui=_coords_ui(info, regions),
+        )
 
 
 class TFTokensCombine(io.ComfyNode):
@@ -363,6 +392,28 @@ class TFTokensPreview(io.ComfyNode):
             image, coords,
             ui=node_preview(image=image, text=f"{selection.count} tokens: {coords or '(none)'}"),
         )
+
+
+def _nothing_selected() -> str:
+    return (
+        "Nothing selected. Click the grid above to pick tokens, or type coordinates -- "
+        "'7,7' is one token on the 16x16 grid, '7,6:9' a run along row 7.\n\n"
+        "The graph stops here on purpose. An empty selection reaching TF Feature Edit "
+        "raises there instead, two nodes further on, where it reads as a crash rather "
+        "than as something you have not done yet."
+    )
+
+
+def _coords_ui(info: str, regions) -> dict:
+    """This node's own body, plus the region map its grid widget needs."""
+    payload = dict(node_preview(text=info) or {})
+    if regions is not None:
+        payload["tf_regions"] = [{
+            "ids": regions.ids.tolist(),
+            "level": int(regions.level),
+            "num_regions": int(regions.num_regions),
+        }]
+    return payload
 
 
 def _node2_notice() -> str:

@@ -28,16 +28,16 @@ someone using it for a real edit, which is the next thing.
 
 Verification, all reproducible from this repo:
 
-- `pytest tests` — 328 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
+- `pytest tests` — 347 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
   every node's schema and `execute` against a stub pipeline.
 - `slurm/gpu_smoke.sbatch` — the nodes against the real TF-L model. **8/8,
-  job 449837**, including two controls: same class + seed reproduces the
+  job 449980**, including two controls: same class + seed reproduces the
   trajectory bit-for-bit, and the sweep's arm 0 reproduces the explicit
   edit-and-resume chain bit-for-bit. Load 16.4 s warm, generate 0.1 s, resume
   2.3 s, a three-seed sweep 0.7 s. (Superseded 7/7 on job 449604, which predates
   `TF Compare Levels` and `TF Sweep Edit`.)
 - `slurm/server_smoke.sbatch` — the workflows through a real ComfyUI server.
-  **12/12, job 449903**, 20 nodes registered, all five workflows
+  **13/13, job 449981**, 20 nodes registered, all five workflows
   executed. This is the only check that a node running several re-samples in one
   `execute` survives ComfyUI's execution engine rather than a direct call, and
   that the sweep's table reaches the client rather than only its images.
@@ -389,8 +389,13 @@ trajectory bit-for-bit. A loop that re-reads the source at the wrong level, or
 shifts a seed by one, still produces a plausible table — the table is not
 self-checking, so something else has to be.
 
-Not swept: a shape edit, which is bound to one level's region map and so has no
-meaningful axis but the seed.
+**Superseded (2026-09-03):** the sweep now covers shape edits as well. The
+original note said a shape edit had "no meaningful axis but the seed" and then
+declined to offer the seed -- a sentence conceding the case it went on to
+refuse. Wiring a region map in switches the edit; both reduce to the same
+primitive and differ only in where f_src comes from, so the loop is unchanged.
+Only l* is genuinely impossible, because a region map describes exactly one
+level, and that is now refused with the reason rather than silently unsupported.
 
 ## A UX pass over the whole thing (2026-09-03)
 
@@ -549,6 +554,67 @@ event to that element so siblings never receive `pointerenter` -- and would have
 failed on touch too, where the browser captures to the pointerdown target
 implicitly. It now captures on the board and hit-tests with
 `document.elementFromPoint`.
+
+## The region picker, finished (2026-09-03)
+
+The original plan's step 2 was "16x16 grid overlay, click -> region-id lookup".
+The grid landed yesterday; the region lookup did not, and the omission was not
+cosmetic. `TF Tokens From Coords` snaps a selection to whole regions whenever a
+map is wired (`min_overlap=0.0` -- a typed coordinate is a deliberate pick, not
+a rough stroke), which is the default in workflows 02 and 05. So the widget
+highlighted the one cell that was clicked while the node quietly took the forty
+sharing its region, and the count beside the grid was wrong every time. A
+half-built feature that lies is worse than an absent one.
+
+The node now hands its map back to its own widget on a `tf_regions` key in the
+`ui` payload, read via `onExecuted` -- the same public hook core's own AUDIO_UI
+widget uses, chosen over `nodeOutputStore` because a file that has to keep
+working should not lean on a store internal. Precedent for a custom `ui` key:
+core's bbox editor reads `input_bboxes` back off its own node the same way.
+
+One click now takes the whole region -- the paper's R_tgt, a semantic part
+rather than an arbitrary token set -- and the grid draws the boundaries. The map
+comes from the *previous* run, so a graph that has never run picks token-wise
+and the node expands it, the same one-round-trip the Painter workflow already
+has. Alt-click always picks the single token, because the `coords` text is what
+a writeup quotes and it must be able to say exactly what was chosen.
+
+`server_smoke` gained a criterion for the payload crossing the wire (16x16 ids,
+50 regions at level 2). A browser is still the only thing that can prove the
+widget *uses* it; that boundary is stated rather than blurred.
+
+## Three from using the grid (2026-09-03)
+
+**An empty selection crashed instead of stopping.** Clearing the grid let an
+empty `TF_TOKENS` travel two nodes downstream and raise out of `TF Feature
+Edit`, arriving as a raw traceback in a modal. The right shape already existed
+-- `TF Tokens From Mask` stops the graph quietly with an instructive note -- and
+`TF Tokens From Coords` now matches it: one `ExecutionBlocker` per declared
+output plus `ui` text, never a message-carrying blocker (which renders as "Node
+threw an error", and only on the first run). The downstream `require_nonempty`
+guards stay: `TF Tokens Combine` can still hand over an empty selection by
+intersecting two disjoint picks, and an edit must refuse that rather than write
+nothing and report success. The tests that covered it were building their empty
+selection *through* the coords node, so they were rewritten to construct one
+directly -- otherwise they would have been testing the new block, not the guard.
+
+**The visible level sliders ran to 15 when only 0-3 exist.** `level_input` used
+`MAX_LEVELS - 1`, so three quarters of every level slider did nothing but get
+silently clamped -- the same dead-knob shape as the old `which` + `level` pair,
+which this repo has now paid for three times. Bounded to `SHIPPED_LEVELS - 1`,
+because four levels is a property of the method rather than a per-run setting.
+The advanced `-1 = auto` widgets keep the wider range deliberately: addressing a
+deeper model than any released one is their entire documented purpose, and
+behind the advanced toggle a wide range misleads nobody. Audited across every
+node: five visible widgets now stop at 3, four advanced ones still reach 15.
+
+**Alt is option on a Mac**, and the description of what it does was wrong in a
+way worth correcting rather than quietly fixing. Alt-click changes the `coords`
+*text*, not the selection: with a region map wired the node snaps at
+`min_overlap=0.0`, so the whole region is selected either way. What it buys is
+"7,7" in the field instead of a nine-run coordinate list -- the line a writeup
+wants. Genuinely sub-region tokens need `regions` unwired. Stated that way now
+in the node description, both READMEs and the widget's own tooltips.
 
 ## Next
 

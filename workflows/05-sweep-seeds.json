@@ -436,6 +436,12 @@
           "link": 12
         },
         {
+          "label": "regions",
+          "name": "regions",
+          "type": "TF_REGIONS",
+          "link": null
+        },
+        {
           "label": "pipeline",
           "name": "pipeline",
           "type": "TF_PIPELINE",
