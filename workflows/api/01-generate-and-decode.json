@@ -1,0 +1,114 @@
+{
+  "1": {
+    "class_type": "TFLoadPipeline",
+    "inputs": {
+      "checkpoint": "auto (download TF_L_edit)",
+      "config": "edit_env_config.yml",
+      "warmup": true
+    },
+    "_meta": {
+      "title": "TF Load Pipeline"
+    }
+  },
+  "2": {
+    "class_type": "TFImageNetClass",
+    "inputs": {
+      "class_name": "213 - Irish setter"
+    },
+    "_meta": {
+      "title": "TF ImageNet Class"
+    }
+  },
+  "3": {
+    "class_type": "TFGenerate",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "class_id": [
+        "2",
+        0
+      ],
+      "seed": 592
+    },
+    "_meta": {
+      "title": "TF Generate"
+    }
+  },
+  "4": {
+    "class_type": "TFDecode",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "levels": [
+        "3",
+        0
+      ],
+      "which": "all levels",
+      "level": 2,
+      "label_levels": true
+    },
+    "_meta": {
+      "title": "TF Decode Levels"
+    }
+  },
+  "5": {
+    "class_type": "TFLatentPreview",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "levels": [
+        "3",
+        0
+      ],
+      "which": "all levels",
+      "level": 2,
+      "size": 512,
+      "label_levels": true
+    },
+    "_meta": {
+      "title": "TF Latent Preview (PCA)"
+    }
+  },
+  "6": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decoded RGB per level"
+    }
+  },
+  "7": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Latent PCA per level"
+    }
+  },
+  "8": {
+    "class_type": "TFLevelsInfo",
+    "inputs": {
+      "levels": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "TF Levels Info"
+    }
+  }
+}

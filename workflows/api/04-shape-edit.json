@@ -1,0 +1,157 @@
+{
+  "1": {
+    "class_type": "TFLoadPipeline",
+    "inputs": {
+      "checkpoint": "auto (download TF_L_edit)",
+      "config": "edit_env_config.yml",
+      "warmup": true
+    },
+    "_meta": {
+      "title": "TF Load Pipeline"
+    }
+  },
+  "2": {
+    "class_type": "TFGenerate",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "class_id": 213,
+      "seed": 592
+    },
+    "_meta": {
+      "title": "TF Generate"
+    }
+  },
+  "3": {
+    "class_type": "TFRegionMap",
+    "inputs": {
+      "levels": [
+        "2",
+        0
+      ],
+      "level": 2,
+      "cosine_threshold": 0.9,
+      "size": 512
+    },
+    "_meta": {
+      "title": "TF Region Map"
+    }
+  },
+  "4": {
+    "class_type": "TFTokensFromCoords",
+    "inputs": {
+      "coords": "7,7 8,7",
+      "levels": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "tokens to hand over"
+    }
+  },
+  "5": {
+    "class_type": "TFTokensFromCoords",
+    "inputs": {
+      "coords": "0,0",
+      "levels": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "one token in the receiving region"
+    }
+  },
+  "6": {
+    "class_type": "TFShapeEdit",
+    "inputs": {
+      "levels": [
+        "2",
+        0
+      ],
+      "level": 2,
+      "regions": [
+        "3",
+        0
+      ],
+      "boundary_tokens": [
+        "4",
+        0
+      ],
+      "receiving_tokens": [
+        "5",
+        0
+      ],
+      "strength": 1.0
+    },
+    "_meta": {
+      "title": "TF Shape Edit"
+    }
+  },
+  "7": {
+    "class_type": "TFResumeFromLevel",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "levels": [
+        "6",
+        0
+      ],
+      "level": 2,
+      "follow_edit": true,
+      "class_id": -1,
+      "seed": 592
+    },
+    "_meta": {
+      "title": "TF Resume From Level"
+    }
+  },
+  "8": {
+    "class_type": "TFDecode",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "levels": [
+        "7",
+        0
+      ],
+      "which": "all levels",
+      "level": 2,
+      "label_levels": true
+    },
+    "_meta": {
+      "title": "TF Decode Levels"
+    }
+  },
+  "9": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "3",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "regions"
+    }
+  },
+  "10": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "after the shape edit"
+    }
+  }
+}

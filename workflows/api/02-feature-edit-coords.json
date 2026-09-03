@@ -1,0 +1,236 @@
+{
+  "1": {
+    "class_type": "TFLoadPipeline",
+    "inputs": {
+      "checkpoint": "auto (download TF_L_edit)",
+      "config": "edit_env_config.yml",
+      "warmup": true
+    },
+    "_meta": {
+      "title": "TF Load Pipeline"
+    }
+  },
+  "2": {
+    "class_type": "TFGenerate",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "class_id": 213,
+      "seed": 592
+    },
+    "_meta": {
+      "title": "target"
+    }
+  },
+  "3": {
+    "class_type": "TFGenerate",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "class_id": 207,
+      "seed": 592
+    },
+    "_meta": {
+      "title": "source"
+    }
+  },
+  "4": {
+    "class_type": "TFRegionMap",
+    "inputs": {
+      "levels": [
+        "2",
+        0
+      ],
+      "level": 2,
+      "cosine_threshold": 0.9,
+      "size": 512
+    },
+    "_meta": {
+      "title": "TF Region Map"
+    }
+  },
+  "5": {
+    "class_type": "TFTokensFromCoords",
+    "inputs": {
+      "coords": "7,7",
+      "levels": [
+        "2",
+        0
+      ],
+      "regions": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "target region"
+    }
+  },
+  "6": {
+    "class_type": "TFTokensFromCoords",
+    "inputs": {
+      "coords": "6,6:9 7,6:9",
+      "levels": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "source tokens"
+    }
+  },
+  "7": {
+    "class_type": "TFFeatureEdit",
+    "inputs": {
+      "levels": [
+        "2",
+        0
+      ],
+      "level": 2,
+      "target_tokens": [
+        "5",
+        0
+      ],
+      "source_tokens": [
+        "6",
+        0
+      ],
+      "source_mode": "region mean",
+      "strength": 1.0,
+      "source_levels": [
+        "3",
+        0
+      ],
+      "source_level": 2
+    },
+    "_meta": {
+      "title": "TF Feature Edit"
+    }
+  },
+  "8": {
+    "class_type": "TFResumeFromLevel",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "levels": [
+        "7",
+        0
+      ],
+      "level": 2,
+      "follow_edit": true,
+      "class_id": -1,
+      "seed": 592
+    },
+    "_meta": {
+      "title": "TF Resume From Level"
+    }
+  },
+  "9": {
+    "class_type": "TFDecode",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "levels": [
+        "2",
+        0
+      ],
+      "which": "final level only",
+      "level": 2,
+      "label_levels": true
+    },
+    "_meta": {
+      "title": "before"
+    }
+  },
+  "10": {
+    "class_type": "TFDecode",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "levels": [
+        "8",
+        0
+      ],
+      "which": "all levels",
+      "level": 2,
+      "label_levels": true
+    },
+    "_meta": {
+      "title": "after"
+    }
+  },
+  "11": {
+    "class_type": "TFLevelCanvas",
+    "inputs": {
+      "pipeline": [
+        "1",
+        0
+      ],
+      "levels": [
+        "2",
+        0
+      ],
+      "level": 2,
+      "view": "latent PCA",
+      "draw_grid": true,
+      "size": 512,
+      "regions": [
+        "4",
+        0
+      ],
+      "highlight": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "TF Level Canvas"
+    }
+  },
+  "12": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "edited, all levels"
+    }
+  },
+  "13": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "9",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "unedited final"
+    }
+  },
+  "14": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "what is selected"
+    }
+  }
+}

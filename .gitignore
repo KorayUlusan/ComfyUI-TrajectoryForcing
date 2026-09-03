@@ -1,0 +1,65 @@
+# ComfyUI-TrajectoryForcing
+#
+# Its own repo (a submodule of msc-thesis), so these rules stand alone rather
+# than leaning on the parent's .gitignore.
+
+# Run outputs, on the same pattern as TrajectoryDreamer/outputs (see the parent
+# repo's CLAUDE.md): anything a run produces lives beside the code that made it,
+# and is never committed.
+# (Listed as /outputs/* rather than /outputs/ so the re-include below can reach
+# inside: git will not descend into an excluded directory to un-exclude a file.)
+/outputs/*
+# ...except the Slurm log directory itself: #SBATCH --output= will not create it,
+# and the job fails at launch when it is missing.
+!/outputs/slurm_logs/
+/outputs/slurm_logs/*
+!/outputs/slurm_logs/.gitkeep
+
+# Checkpoints and model weights are multi-GB and belong outside git -- the plan
+# is to symlink them from TrajectoryForcing/checkpoints rather than copy them.
+/checkpoints/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.npz
+
+# ComfyUI drops these into a custom-node directory at runtime.
+/web/extensions/**/dist/
+*.log
+
+# Python
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+
+# Environments -- ComfyUI's own venv lives outside this repo entirely, so the
+# usual `env/` rule is not needed and would swallow env/setup.sh, which is the
+# tracked script that builds it (same convention as TrajectoryDreamer/env/).
+.venv
+venv/
+ENV/
+.env
+.envrc
+
+# Notebooks
+.ipynb_checkpoints
+
+# Editor / OS
+.DS_Store
+*.tmp

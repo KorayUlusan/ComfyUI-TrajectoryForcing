@@ -1,0 +1,466 @@
+{
+  "id": "trajectory-forcing-01-generate-and-decode",
+  "revision": 0,
+  "last_node_id": 8,
+  "last_link_id": 9,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "TFLoadPipeline",
+      "pos": [
+        80,
+        80
+      ],
+      "size": [
+        320,
+        118
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "pipeline",
+          "name": "pipeline",
+          "type": "TF_PIPELINE",
+          "slot_index": 0,
+          "links": [
+            1,
+            3,
+            5
+          ]
+        },
+        {
+          "label": "info",
+          "name": "info",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TFLoadPipeline"
+      },
+      "widgets_values": [
+        "auto (download TF_L_edit)",
+        "edit_env_config.yml",
+        true
+      ]
+    },
+    {
+      "id": 2,
+      "type": "TFImageNetClass",
+      "pos": [
+        80,
+        380
+      ],
+      "size": [
+        320,
+        66
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "class_id",
+          "name": "class_id",
+          "type": "INT",
+          "slot_index": 0,
+          "links": [
+            2
+          ]
+        },
+        {
+          "label": "name",
+          "name": "name",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TFImageNetClass"
+      },
+      "widgets_values": [
+        "213 - Irish setter"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "TFGenerate",
+      "pos": [
+        460,
+        80
+      ],
+      "size": [
+        320,
+        170
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "pipeline",
+          "name": "pipeline",
+          "type": "TF_PIPELINE",
+          "link": 1
+        },
+        {
+          "label": "class_id",
+          "name": "class_id",
+          "type": "INT",
+          "link": 2,
+          "widget": {
+            "name": "class_id"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "label": "levels",
+          "name": "levels",
+          "type": "TF_LEVELS",
+          "slot_index": 0,
+          "links": [
+            4,
+            6,
+            9
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TFGenerate"
+      },
+      "widgets_values": [
+        213,
+        592,
+        "fixed"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "TFDecode",
+      "pos": [
+        840,
+        80
+      ],
+      "size": [
+        320,
+        170
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "pipeline",
+          "name": "pipeline",
+          "type": "TF_PIPELINE",
+          "link": 3
+        },
+        {
+          "label": "levels",
+          "name": "levels",
+          "type": "TF_LEVELS",
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            7
+          ]
+        },
+        {
+          "label": "warnings",
+          "name": "warnings",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TFDecode"
+      },
+      "widgets_values": [
+        "all levels",
+        2,
+        true
+      ]
+    },
+    {
+      "id": 5,
+      "type": "TFLatentPreview",
+      "pos": [
+        840,
+        440
+      ],
+      "size": [
+        320,
+        222
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "pipeline",
+          "name": "pipeline",
+          "type": "TF_PIPELINE",
+          "link": 5
+        },
+        {
+          "label": "levels",
+          "name": "levels",
+          "type": "TF_LEVELS",
+          "link": 6
+        },
+        {
+          "label": "palette_from",
+          "name": "palette_from",
+          "type": "TF_LEVELS",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TFLatentPreview"
+      },
+      "widgets_values": [
+        "all levels",
+        2,
+        512,
+        true
+      ]
+    },
+    {
+      "id": 6,
+      "type": "PreviewImage",
+      "pos": [
+        1220,
+        80
+      ],
+      "size": [
+        320,
+        66
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 7
+        }
+      ],
+      "outputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "Decoded RGB per level"
+    },
+    {
+      "id": 7,
+      "type": "PreviewImage",
+      "pos": [
+        1220,
+        380
+      ],
+      "size": [
+        320,
+        66
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "Latent PCA per level"
+    },
+    {
+      "id": 8,
+      "type": "TFLevelsInfo",
+      "pos": [
+        1220,
+        680
+      ],
+      "size": [
+        320,
+        66
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "levels",
+          "name": "levels",
+          "type": "TF_LEVELS",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "label": "info",
+          "name": "info",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": []
+        },
+        {
+          "label": "num_levels",
+          "name": "num_levels",
+          "type": "INT",
+          "slot_index": 1,
+          "links": []
+        },
+        {
+          "label": "class_id",
+          "name": "class_id",
+          "type": "INT",
+          "slot_index": 2,
+          "links": []
+        },
+        {
+          "label": "seed",
+          "name": "seed",
+          "type": "INT",
+          "slot_index": 3,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TFLevelsInfo"
+      },
+      "widgets_values": []
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      3,
+      0,
+      "TF_PIPELINE"
+    ],
+    [
+      2,
+      2,
+      0,
+      3,
+      1,
+      "INT"
+    ],
+    [
+      3,
+      1,
+      0,
+      4,
+      0,
+      "TF_PIPELINE"
+    ],
+    [
+      4,
+      3,
+      0,
+      4,
+      1,
+      "TF_LEVELS"
+    ],
+    [
+      5,
+      1,
+      0,
+      5,
+      0,
+      "TF_PIPELINE"
+    ],
+    [
+      6,
+      3,
+      0,
+      5,
+      1,
+      "TF_LEVELS"
+    ],
+    [
+      7,
+      4,
+      0,
+      6,
+      0,
+      "IMAGE"
+    ],
+    [
+      8,
+      5,
+      0,
+      7,
+      0,
+      "IMAGE"
+    ],
+    [
+      9,
+      3,
+      0,
+      8,
+      0,
+      "TF_LEVELS"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "description": "The vertical slice: sample one coarse-to-fine trajectory and look at every level, as decoded RGB and as the raw PCA token grid."
+  },
+  "version": 0.4
+}

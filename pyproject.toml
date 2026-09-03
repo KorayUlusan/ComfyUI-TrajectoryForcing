@@ -1,0 +1,28 @@
+[project]
+name = "comfyui-trajectoryforcing"
+description = "Trajectory Forcing's coarse-to-fine generation and interactive latent-token editing as ComfyUI nodes."
+version = "0.1.0"
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.11"
+# Deliberately empty. The heavy dependencies (JAX, flax, torch, transformers)
+# belong to TrajectoryForcing and are pinned there; installing them from here
+# would let a `pip install` in the ComfyUI venv silently move a pin the model
+# checkpoints were trained against. See requirements.txt for what the venv needs
+# and env/setup.sh for how it is built.
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/korayulusan/ComfyUI-TrajectoryForcing"
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "Trajectory Forcing"
+Icon = ""
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

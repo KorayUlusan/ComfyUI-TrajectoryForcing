@@ -1,0 +1,58 @@
+# What the ComfyUI venv needs on top of ComfyUI's own requirements.txt.
+#
+# Install order matters, and env/setup.sh does it correctly -- prefer running
+# that over pip-installing this file on its own. The short version: this
+# extension runs TrajectoryForcing's JAX model *inside* the ComfyUI process, so
+# one environment has to satisfy both dependency sets at once.
+#
+# The one place they disagree, found by running it (2026-09-03):
+#
+#   TrajectoryForcing pins torch==2.6.0. ComfyUI 0.34's comfy-kitchen==0.2.31
+#   registers a torch custom op annotated `list[int]`, which torch 2.6's
+#   infer_schema rejects outright -- `import comfy.quant_ops` fails, so ComfyUI
+#   does not start at all. torch 2.8.0 is the resolution used here. Nothing on
+#   TF's inference path (the RAE ViT-XL decoder, via transformers) is version
+#   sensitive, and TF's own training pin is not binding on an inference-only
+#   install -- but this is a deviation from TrajectoryForcing/requirements.txt
+#   and belongs in any writeup of a number produced through these nodes.
+#
+# cu128 rather than cu130: jax 0.4.36 is a CUDA 12 build, and keeping torch on
+# the same CUDA major avoids two runtimes in one process. ComfyUI logs a warning
+# asking for cu130 -- that is about its own quantisation kernels, which nothing
+# here uses.
+
+# --- TrajectoryForcing's JAX stack, pinned exactly as TF pins it -------------
+jax[cuda12]==0.4.36
+flax==0.10.4
+optax==0.2.5
+orbax-checkpoint==0.11.0
+chex==0.1.87
+ml_dtypes==0.5.1
+tensorstore==0.1.76
+ml_collections==1.1.0
+
+# --- torch, moved off TF's pin for the reason above -------------------------
+# install with: --index-url https://download.pytorch.org/whl/cu128
+torch==2.8.0
+torchvision==0.23.0
+torchaudio==2.8.0
+
+# --- what TF's inference path needs beyond that -----------------------------
+transformers==5.3.0
+huggingface_hub
+PyYAML
+# wandb is not optional: TF's utils/logging_util.py imports it at module scope,
+# and utils/ckpt_util.py -- which Pipeline.__init__ imports -- pulls that in.
+wandb==0.22.0
+numpy>=2.2
+scipy
+scikit-learn
+pillow
+einops
+timm
+
+# --- then ComfyUI's own requirements.txt, installed last --------------------
+# -r ${COMFY_DIR}/requirements.txt
+
+# --- tests ------------------------------------------------------------------
+pytest
