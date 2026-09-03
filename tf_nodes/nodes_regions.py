@@ -10,16 +10,18 @@ is the one-click "grab the whole cluster" of the editing env's region select.
 from __future__ import annotations
 
 import numpy as np
-from comfy_api.latest import io, ui
+from comfy_api.latest import io
 from comfy_execution.graph_utils import ExecutionBlocker
 
 from . import render, tokens
+from .locate import vue_nodes_enabled
 from .sockets import (
-    CATEGORY,
+    CATEGORY_SELECT,
     TFLevelsSocket,
     TFRegionsSocket,
     TFTokensSocket,
     level_input,
+    node_preview,
     pipeline_input,
     resolve_pipeline,
 )
@@ -34,12 +36,22 @@ class TFLevelCanvas(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFLevelCanvas",
+            search_aliases=["canvas", "paint", "grid", "brush", "painter", "mask"],
             display_name="TF Level Canvas",
-            category=CATEGORY,
+            category=CATEGORY_SELECT,
+            # Publishing this node's image as a UI preview is what makes the
+            # Painter downstream show something to paint over. Painter resolves
+            # its backdrop with `nodeOutputStore.getNodeImageUrls(inputNode)` --
+            # the *stored preview* of whatever feeds its image slot, not the
+            # tensor on the wire. Without a preview the Painter is a blank
+            # square and you are painting blind.
+            has_intermediate_output=True,
             description=(
                 "Render one level as a paintable canvas: PCA latent or decoded RGB, with the token "
                 "grid and optionally the region boundaries drawn on. Feed it to core Painter and "
-                "the mask that comes back lines up with the token grid."
+                "the mask that comes back lines up with the token grid.\n\n"
+                "The Painter node needs ComfyUI's Node 2.0 rendering; this node says so if it is "
+                "switched off."
             ),
             inputs=[
                 TFLevelsSocket.Input("levels"),
@@ -49,14 +61,14 @@ class TFLevelCanvas(io.ComfyNode):
                     tooltip="PCA shows the token structure the edit acts on; decoded RGB shows what "
                             "that structure looks like as an image.",
                 ),
-                io.Boolean.Input("draw_grid", default=True),
+                io.Boolean.Input("draw_grid", default=True, advanced=True),
                 io.Boolean.Input(
-                    "label_coords", default=True,
+                    "label_coords", default=True, advanced=True,
                     tooltip="Number the rows and columns, so a coordinate for TF Tokens From "
                             "Coords can be read off instead of counted.",
                 ),
                 io.Int.Input(
-                    "size", default=512, min=128, max=2048, step=64,
+                    "size", default=512, min=128, max=2048, step=64, advanced=True,
                     tooltip="Rounded so each token is a whole number of pixels.",
                 ),
                 TFRegionsSocket.Input(
@@ -96,7 +108,11 @@ class TFLevelCanvas(io.ComfyNode):
             canvas = render.draw_selection(canvas, highlight)
         if label_coords:
             canvas = render.draw_ticks(canvas, levels.grid)
-        return io.NodeOutput(render.to_image(canvas), index)
+        image = render.to_image(canvas)
+        notice = _node2_notice()
+        # The image is what the Painter downstream uses as its backdrop, so it
+        # is published even alongside the notice.
+        return io.NodeOutput(image, index, ui=node_preview(image=image, text=notice))
 
 
 class TFRegionMap(io.ComfyNode):
@@ -104,8 +120,10 @@ class TFRegionMap(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFRegionMap",
+            search_aliases=["region", "cluster", "segment", "cosine", "parts"],
+            has_intermediate_output=True,
             display_name="TF Region Map",
-            category=CATEGORY,
+            category=CATEGORY_SELECT,
             description=(
                 "Cluster a level's tokens into connected regions by cosine similarity. These are "
                 "the R in the paper's edits: a feature edit replaces one region's feature, a shape "
@@ -119,7 +137,7 @@ class TFRegionMap(io.ComfyNode):
                     tooltip="Higher splits into more, smaller regions. "
                             "0.9 matches the editing env's default.",
                 ),
-                io.Int.Input("size", default=512, min=128, max=2048, step=64),
+                io.Int.Input("size", default=512, min=128, max=2048, step=64, advanced=True),
             ],
             outputs=[
                 TFRegionsSocket.Output("regions"),
@@ -139,7 +157,13 @@ class TFRegionMap(io.ComfyNode):
         regions = tokens.build_region_map(levels.level(index), index, cosine_threshold)
         picture = render.draw_grid(render.render_regions(regions, size), regions.ids.shape)
         picture = render.draw_ticks(picture, regions.ids.shape)
-        return io.NodeOutput(regions, render.to_image(picture), regions.num_regions, index)
+        image = render.to_image(picture)
+        return io.NodeOutput(
+            regions, image, regions.num_regions, index,
+            ui=node_preview(image=image,
+                            text=f"{regions.num_regions} regions at level {index} "
+                                 f"(threshold {cosine_threshold:.2f})"),
+        )
 
 
 class TFTokensFromMask(io.ComfyNode):
@@ -147,8 +171,9 @@ class TFTokensFromMask(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFTokensFromMask",
+            search_aliases=["mask", "paint", "brush", "tokens", "select"],
             display_name="TF Tokens From Mask",
-            category=CATEGORY,
+            category=CATEGORY_SELECT,
             # Keeps this node's own text visible on a re-run and across a page
             # refresh. Without it the "nothing painted yet" notice shows once
             # and is gone the next time, when the node is served from cache.
@@ -215,9 +240,9 @@ class TFTokensFromMask(io.ComfyNode):
             # free to say why in this node's own body.
             stop = ExecutionBlocker(None)
             reason = _nothing_painted(painted, coverage, regions, region_overlap)
-            return io.NodeOutput(stop, stop, stop, ui=ui.PreviewText(reason))
+            return io.NodeOutput(stop, stop, stop, ui=node_preview(text=reason))
         info = _describe(selection)
-        return io.NodeOutput(selection, selection.count, info, ui=ui.PreviewText(info))
+        return io.NodeOutput(selection, selection.count, info, ui=node_preview(text=info))
 
 
 class TFTokensFromCoords(io.ComfyNode):
@@ -225,8 +250,10 @@ class TFTokensFromCoords(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFTokensFromCoords",
+            search_aliases=["coords", "tokens", "select", "row", "col", "typed"],
+            has_intermediate_output=True,
             display_name="TF Tokens From Coords",
-            category=CATEGORY,
+            category=CATEGORY_SELECT,
             description=(
                 "Type token coordinates directly: 'row,col' pairs, with 'row,col0:col1' for a run. "
                 "Reproducible in a way a brush stroke is not, which is what a written-up experiment needs."
@@ -263,7 +290,8 @@ class TFTokensFromCoords(io.ComfyNode):
             # Any overlap at all expands the region: a typed coordinate is a
             # deliberate pick of one token, not a rough stroke to be thresholded.
             selection = tokens.snap_to_regions(selection, regions, 0.0)
-        return io.NodeOutput(selection, selection.count, _describe(selection))
+        info = _describe(selection)
+        return io.NodeOutput(selection, selection.count, info, ui=node_preview(text=info))
 
 
 class TFTokensCombine(io.ComfyNode):
@@ -271,8 +299,10 @@ class TFTokensCombine(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFTokensCombine",
+            search_aliases=["combine", "union", "intersect", "subtract", "invert", "boolean"],
+            has_intermediate_output=True,
             display_name="TF Tokens Combine",
-            category=CATEGORY,
+            category=CATEGORY_SELECT,
             description="Set operations on token selections -- build a region up from several strokes.",
             inputs=[
                 TFTokensSocket.Input("a"),
@@ -289,7 +319,8 @@ class TFTokensCombine(io.ComfyNode):
     @classmethod
     def execute(cls, a, operation, b=None) -> io.NodeOutput:
         out = tokens.combine(a, b, operation)
-        return io.NodeOutput(out, out.count)
+        return io.NodeOutput(
+            out, out.count, ui=node_preview(text=f"{out.count} tokens after {operation}"))
 
 
 class TFTokensPreview(io.ComfyNode):
@@ -297,12 +328,14 @@ class TFTokensPreview(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFTokensPreview",
+            search_aliases=["preview", "tokens", "selection", "show", "check"],
+            has_intermediate_output=True,
             display_name="TF Tokens Preview",
-            category=CATEGORY,
+            category=CATEGORY_SELECT,
             description="Draw a token selection on its own, without needing the pipeline loaded.",
             inputs=[
                 TFTokensSocket.Input("tokens"),
-                io.Int.Input("size", default=512, min=128, max=2048, step=64),
+                io.Int.Input("size", default=512, min=128, max=2048, step=64, advanced=True),
             ],
             outputs=[io.Image.Output("image"), io.String.Output("coords")],
         )
@@ -316,7 +349,31 @@ class TFTokensPreview(io.ComfyNode):
         canvas = render.draw_grid(render.draw_selection(canvas, selection), grid)
         canvas = render.draw_ticks(canvas, grid)
         coords = " ".join(f"{r},{c}" for r, c in selection.coords)
-        return io.NodeOutput(render.to_image(canvas), coords)
+        image = render.to_image(canvas)
+        return io.NodeOutput(
+            image, coords,
+            ui=node_preview(image=image, text=f"{selection.count} tokens: {coords or '(none)'}"),
+        )
+
+
+def _node2_notice() -> str:
+    """Warn only the users who actually need it, and tell them exactly where to click.
+
+    The Painter widget exists solely in ComfyUI's Vue node rendering; under the
+    classic renderer it shows the text "Node 2.0 only" and cannot be painted on.
+    Whether it is on is readable from ComfyUI's own settings file, so this stays
+    silent for the majority who already have it rather than nagging everyone.
+    """
+    if vue_nodes_enabled() is not False:
+        return ""
+    return (
+        "The Painter node needs Node 2.0, which is currently off -- it will show "
+        "\"Node 2.0 only\" instead of a brush.\n\n"
+        "Turn it on:  Settings (gear, bottom left)  ->  search \"Node 2.0\"  ->  "
+        "enable it, then reload the page.\n\n"
+        "This canvas is still correct; only the painting step is blocked. Workflow 02 "
+        "types coordinates instead and needs none of this."
+    )
 
 
 def _nothing_painted(painted: np.ndarray, coverage: float, regions, region_overlap: float) -> str:

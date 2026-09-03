@@ -131,7 +131,31 @@ numbered groups.
 
 ## The nodes
 
-All under the **TrajectoryForcing** category.
+Under **TrajectoryForcing** in the node menu, split into `generate`, `select`,
+`edit` and `save and load`. Every node is searchable by what it does as well as
+its name — "paint", "mask", "diff", "region", "seed" all find the right one.
+
+**`-1` always means "decide for me".** A handful of advanced widgets take it,
+and each one's label says so — `level (-1 = auto)`, `class id (-1 = auto)`,
+`source level (-1 = auto)`. The node then reports what auto chose, so you never
+have to infer it:
+
+```
+resume from level 2 (auto: the level the edit wrote to); class 213 (auto: the
+trajectory's own); seed 592
+levels 3..3 re-sampled
+```
+
+Set a real value and it is used instead, reported as *set on the node*.
+
+**Rarely-used settings are hidden behind ComfyUI's advanced toggle** rather
+than removed — about half of them. Turn on *Settings → Always show advanced
+widgets* to see everything a node can do.
+
+**Every node shows its own result in its body**: the edit summary, the region
+count, the selection, the comparison table. Nothing needs wiring to a preview
+node to be read, which matters because stock ComfyUI has no node that can
+display a string at all.
 
 ### Generating and looking
 
@@ -140,7 +164,7 @@ All under the **TrajectoryForcing** category.
 | **TF Load Pipeline** | Loads the flow model and RAE decoder. Cached for the life of the process, so re-queueing never re-reads the checkpoint. `warmup` pays the XLA compile here instead of on your first prompt. |
 | **TF ImageNet Class** | Pick a class by name, get its id. |
 | **TF Generate** | Samples one full trajectory. Outputs every level, not just the last. |
-| **TF Decode Levels** | RAE-decodes all levels, the final one, or a single one. |
+| **TF Decode Levels** | RAE-decodes all levels, the final one, or one you name — a single dropdown, not a mode plus a number. |
 | **TF Latent Preview (PCA)** | The token grid as PCA false colour — far cheaper than decoding, and it shows the structure the edits act on. `palette_from` fits the colours jointly with a second trajectory so two images are comparable. |
 | **TF Levels Info** | Shape, class id and name, seed, and the edit history of a trajectory. |
 | **TF Compare Levels** | What changed between two trajectories, per level and per token: a report, and a heatmap of where. Answers "did the edit do anything" with a number instead of eyeballs — an edit at *l\** should leave every level below it untouched. |
@@ -173,7 +197,7 @@ what propagates it.
 |---|---|
 | **TF Feature Edit** | Replaces the target tokens' features with one sourced from elsewhere — same trajectory or a second one. `region mean` is the paper's `f_src` (one averaged vector fills the target); `token cycle` copies token-for-token. `strength` interpolates rather than replacing. |
 | **TF Shape Edit** | Hands boundary tokens from one region to a neighbour: they take on the *receiving region's* mean feature, so its extent changes and its content does not. |
-| **TF Resume From Level** | Re-samples every level above *l\**, conditioned on the canvas sitting there. Levels below are untouched — sampling is Markov in the level index, so an edit only ever propagates upward. `follow_edit` picks up *l\** from the upstream edit node. |
+| **TF Resume From Level** | Re-samples every level above *l\**, conditioned on the canvas sitting there. Levels below are untouched — sampling is Markov in the level index, so an edit only ever propagates upward. Left alone it follows the upstream edit, so *l\** cannot disagree with where the edit landed. |
 | **TF Save / Load Levels** | A trajectory to and from `output/trajectory_forcing/*.npz`, with its class, seed and edit history. A trajectory costs GPU time and is what every edit is measured against; reloading the exact one an earlier run used is what makes two edits comparable. |
 
 **Most nodes need no `pipeline` wire.** A trajectory carries the pipeline that
@@ -198,6 +222,15 @@ you the pre-edit trajectory above *l\**.
 **"Nothing painted yet" in workflow 03.** Working as intended — that workflow
 needs two runs. See
 [workflows/README.md](workflows/README.md#03--feature-edit-painter).
+
+**`Address already in use` from `serve.sh`.** It clears its own leftovers at
+startup and steps to the next free port if something else holds it, so this
+should not recur — if it does, `ss -ltnp | grep 8188` names the process.
+
+**The Painter node says "Node 2.0 only".** That widget exists only in ComfyUI's
+new node rendering. **Settings (gear, bottom left) → search "Node 2.0" →
+enable**, then reload the page. *TF Level Canvas* reads the setting and says so
+in its own body when it is off.
 
 **The first run takes minutes.** Loading the checkpoint plus an XLA compile.
 Once per ComfyUI start; later runs take about a second. `warmup` on *TF Load

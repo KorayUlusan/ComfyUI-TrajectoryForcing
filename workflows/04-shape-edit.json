@@ -191,7 +191,7 @@
       ],
       "size": [
         320,
-        66
+        430
       ],
       "flags": {},
       "order": 4,
@@ -425,7 +425,7 @@
       ],
       "size": [
         320,
-        222
+        196
       ],
       "flags": {},
       "order": 8,
@@ -466,11 +466,10 @@
         "Node name for S&R": "TFResumeFromLevel"
       },
       "widgets_values": [
-        2,
-        true,
-        -1,
         592,
-        "fixed"
+        "fixed",
+        -1,
+        -1
       ]
     },
     {
@@ -524,8 +523,8 @@
       },
       "widgets_values": [
         "all levels",
-        2,
-        true
+        true,
+        -1
       ]
     },
     {
@@ -537,7 +536,7 @@
       ],
       "size": [
         320,
-        66
+        430
       ],
       "flags": {},
       "order": 10,
@@ -693,7 +692,7 @@
         818,
         16,
         744,
-        512
+        876
       ],
       "color": "#b58b2a",
       "font_size": 24,
@@ -719,7 +718,7 @@
         2338,
         16,
         744,
-        256
+        516
       ],
       "color": "#8A8",
       "font_size": 24,

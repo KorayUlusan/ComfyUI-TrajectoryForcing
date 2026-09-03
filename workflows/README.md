@@ -115,9 +115,18 @@ The same edit, but you pick the region with a brush.
 produce the canvas before there is anything to paint on:
 
 1. **Run.** It stops at *TF Tokens From Mask* with a note saying nothing is
-   painted yet. The canvas appears in the **Painter** node.
+   painted yet. The canvas appears **inside the Painter node**.
 2. **Paint** over the area you want to change.
 3. **Run again.** Now it finishes.
+
+> **"Node 2.0 only" in the Painter?** That widget exists only in ComfyUI's new
+> node rendering. **Settings (gear, bottom left) → search "Node 2.0" → enable**,
+> then reload. *TF Level Canvas* detects the setting and says so too. Workflow
+> 02 needs none of this.
+
+The Painter shows the canvas behind your brush because *TF Level Canvas*
+publishes it as a node preview — the Painter takes its backdrop from the stored
+preview of whatever feeds its `image` slot, not from the wire.
 
 The grid on the canvas is the token grid — one cell is one token. The yellow
 lines are region boundaries. Your stroke is **snapped to whole regions**, so it
@@ -192,6 +201,7 @@ Three things to know when wiring your own graph:
   re-generates the finer levels. A trajectory that has been edited but not
   resumed is marked, and *TF Decode Levels* warns rather than silently showing
   you stale levels.
-- **Use `follow_edit`.** It takes the level from whichever edit node fed it, so
-  the two cannot disagree. Turn it off only when you deliberately want to resume
-  from somewhere else.
+- **Leave the advanced `-1`s alone unless you mean it.** `-1` means "decide for
+  me" everywhere it appears: *TF Resume From Level* takes the level from
+  whichever edit fed it and keeps the trajectory's class, *TF Feature Edit*
+  reads the source from the level being edited. Each node prints which it did.

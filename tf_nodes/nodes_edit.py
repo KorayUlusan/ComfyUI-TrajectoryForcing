@@ -20,11 +20,15 @@ from comfy_api.latest import io
 
 from . import tokens
 from .sockets import (
-    CATEGORY,
+    AUTO,
+    CATEGORY_EDIT,
     TFLevelsSocket,
     TFRegionsSocket,
     TFTokensSocket,
+    auto_label,
+    auto_level_input,
     level_input,
+    node_preview,
     pipeline_input,
     resolve_pipeline,
     seed_input,
@@ -38,8 +42,10 @@ class TFFeatureEdit(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFFeatureEdit",
+            search_aliases=["edit", "feature", "swap", "transfer", "replace", "token exchange"],
+            has_intermediate_output=True,
             display_name="TF Feature Edit",
-            category=CATEGORY,
+            category=CATEGORY_EDIT,
             description=(
                 "Replace the selected tokens' features with one sourced from elsewhere. Because "
                 "semantically similar content sits near each other in DINOv2 space, this transfers "
@@ -53,7 +59,7 @@ class TFFeatureEdit(io.ComfyNode):
                 TFTokensSocket.Input("target_tokens", tooltip="Tokens that receive the new feature."),
                 TFTokensSocket.Input("source_tokens", tooltip="Tokens the feature is taken from."),
                 io.Combo.Input(
-                    "source_mode", options=SOURCE_MODES,
+                    "source_mode", options=SOURCE_MODES, advanced=True,
                     tooltip="'region mean' is the paper's f_src: one averaged vector fills the whole "
                             "target. 'token cycle' copies token-for-token, keeping the source's "
                             "internal variation.",
@@ -68,8 +74,11 @@ class TFFeatureEdit(io.ComfyNode):
                     tooltip="Take the source feature from a different trajectory -- the cross-image "
                             "token exchange. Unwired means same trajectory.",
                 ),
-                level_input("source_level", tooltip="Level to read the source feature from. Levels "
-                                                    "share a token grid, so this need not match l*."),
+                auto_level_input(
+                    "source_level", "reads the source from the same level as the edit",
+                    "Levels share a token grid, so a different one is legal and occasionally "
+                    "what you want -- coarse content written into a fine canvas.",
+                ),
             ],
             outputs=[TFLevelsSocket.Output("levels"), io.String.Output("info")],
         )
@@ -88,7 +97,7 @@ class TFFeatureEdit(io.ComfyNode):
 
         source_stack = source_levels if source_levels is not None else levels
         source_tokens.check_grid(source_stack.grid, "source_tokens")
-        src_index = source_stack.clamp(source_level)
+        src_index = source_stack.clamp(index if int(source_level) < 0 else source_level)
         source_tokens.check_level(src_index, "source_tokens")
         source_tokens.require_nonempty("source_tokens")
 
@@ -96,12 +105,15 @@ class TFFeatureEdit(io.ComfyNode):
         canvas = tokens.write_feature(levels.level(index), target_tokens, feature, strength)
 
         origin = "same trajectory" if source_levels is None else f"class {source_stack.class_id}"
+        from_level = f"level {src_index}" + (" (auto: same as the edit)"
+                                             if int(source_level) < 0 else "")
         note = (
             f"feature edit: {target_tokens.count} tokens at level {index} <- "
-            f"{source_mode} of {source_tokens.count} tokens at level {src_index} ({origin}), "
+            f"{source_mode} of {source_tokens.count} tokens at {from_level} ({origin}), "
             f"strength {strength:.2f}"
         )
-        return io.NodeOutput(levels.with_level(index, canvas, note), note)
+        return io.NodeOutput(levels.with_level(index, canvas, note), note,
+                             ui=node_preview(text=note))
 
 
 class TFShapeEdit(io.ComfyNode):
@@ -109,8 +121,10 @@ class TFShapeEdit(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFShapeEdit",
+            search_aliases=["shape", "boundary", "reassign", "grow", "shrink", "edit"],
+            has_intermediate_output=True,
             display_name="TF Shape Edit",
-            category=CATEGORY,
+            category=CATEGORY_EDIT,
             description=(
                 "Move boundary tokens from one region into a neighbouring one: the tokens take on "
                 "the receiving region's mean feature, so the region's spatial extent changes while "
@@ -131,7 +145,8 @@ class TFShapeEdit(io.ComfyNode):
                     tooltip="Any token inside the region absorbing them; the whole region it names "
                             "supplies the mean feature.",
                 ),
-                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.05),
+                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.05,
+                               advanced=True),
             ],
             outputs=[TFLevelsSocket.Output("levels"), io.String.Output("info")],
         )
@@ -175,7 +190,8 @@ class TFShapeEdit(io.ComfyNode):
             f"{donor_ids} into region(s) {receiving_ids} "
             f"({int(receiving_mask.sum())} tokens), strength {strength:.2f}"
         )
-        return io.NodeOutput(levels.with_level(index, edited, note), note)
+        return io.NodeOutput(levels.with_level(index, edited, note), note,
+                             ui=node_preview(text=note))
 
 
 class TFResumeFromLevel(io.ComfyNode):
@@ -183,53 +199,64 @@ class TFResumeFromLevel(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFResumeFromLevel",
+            search_aliases=["resume", "regenerate", "propagate", "re-sample", "apply"],
+            has_intermediate_output=True,
             display_name="TF Resume From Level",
-            category=CATEGORY,
+            category=CATEGORY_EDIT,
             description=(
                 "Re-sample every level above l*, conditioned on the (edited) canvas sitting there. "
                 "Levels below l* are left exactly as they were -- sampling is Markov in the level "
-                "index, so an edit only ever propagates upward."
+                "index, so an edit only ever propagates upward.\n\n"
+                "Left alone it follows the upstream edit, so l* cannot disagree with where the "
+                "edit actually landed."
             ),
             inputs=[
                 TFLevelsSocket.Input("levels"),
-                level_input(tooltip="l*. IGNORED when 'follow_edit' is on, which takes the "
-                                    "level from the upstream edit instead."),
-                io.Boolean.Input(
-                    "follow_edit", default=True,
-                    tooltip="Resume from whichever level the upstream edit node wrote to, ignoring "
-                            "the level widget. Off means the widget decides.",
+                seed_input(),
+                auto_level_input(
+                    "level", "resumes from whichever level the upstream edit wrote to",
+                    "Set a level to resume from somewhere else instead. Levels below it are "
+                    "left untouched either way.",
                 ),
                 io.Int.Input(
-                    "class_id", default=-1, min=-1, max=999,
-                    tooltip="Class the re-sampled levels are conditioned on. -1 keeps the "
-                            "trajectory's own class, which is what an edit normally wants.",
+                    "class_id", display_name=auto_label("class_id"),
+                    default=AUTO, min=AUTO, max=999, advanced=True,
+                    tooltip="Class the re-sampled levels are conditioned on. -1 (auto) keeps "
+                            "the trajectory's own class, which is what an edit normally wants.",
                 ),
-                seed_input(),
                 pipeline_input(),
             ],
             outputs=[TFLevelsSocket.Output("levels"), io.String.Output("info")],
         )
 
     @classmethod
-    def execute(cls, levels, level, follow_edit, class_id, seed, pipeline=None) -> io.NodeOutput:
+    def execute(cls, levels, seed, level, class_id, pipeline=None) -> io.NodeOutput:
         pipeline = resolve_pipeline(pipeline, levels, "TF Resume From Level")
         start = level
-        if follow_edit:
+        if int(level) < 0:
             if levels.dirty_level is None:
                 raise ValueError(
-                    "'follow_edit' is on but this trajectory carries no edit to follow. Turn it off "
-                    "to resume from the level widget instead."
+                    "This trajectory carries no edit to follow, so there is no level to resume "
+                    "from. Wire an edit node in, or set 'level' (advanced) to resume from a "
+                    "level of your choosing."
                 )
             start = levels.dirty_level
         start = levels.clamp(start)
         effective_class = levels.class_id if int(class_id) < 0 else int(class_id)
 
         latents = pipeline.resume(levels.latents, start, effective_class, seed)
+        # Spelling out what -1 turned into: the label says a widget is on auto,
+        # this says what auto decided, which is the half a sentinel hides.
+        why_level = ("auto: the level the edit wrote to" if int(level) < 0
+                     else "set on the node")
+        why_class = ("auto: the trajectory's own" if int(class_id) < 0
+                     else "set on the node")
         note = (
-            f"resume from level {start} (class {effective_class}, seed {int(seed)}): "
-            f"levels {start + 1}..{levels.num_levels - 1} re-sampled"
-            if start < levels.num_levels - 1
-            else f"resume from level {start}: nothing above it to re-sample"
+            f"resume from level {start} ({why_level}); "
+            f"class {effective_class} ({why_class}); seed {int(seed)}\n"
+            + (f"levels {start + 1}..{levels.num_levels - 1} re-sampled"
+               if start < levels.num_levels - 1
+               else "nothing above it to re-sample")
         )
         # Resuming refreshes everything above `start`, so it settles a pending
         # edit only if the edit was at or below it. Resuming from *above* one --
@@ -249,4 +276,4 @@ class TFResumeFromLevel(io.ComfyNode):
             dirty_level=still_dirty,
             pipeline=pipeline,
         )
-        return io.NodeOutput(out, note)
+        return io.NodeOutput(out, note, ui=node_preview(text=note))

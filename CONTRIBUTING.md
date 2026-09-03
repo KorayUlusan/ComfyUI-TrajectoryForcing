@@ -33,7 +33,7 @@ logic there and let `nodes_*.py` stay a thin schema-and-wiring layer.
 ## Tests
 
 ```bash
-pytest tests                      # 158 tests, no GPU, ~5 s
+pytest tests                      # 213 tests, no GPU, ~5 s
 sbatch slurm/gpu_smoke.sbatch     # the nodes against the real model
 sbatch slurm/server_smoke.sbatch  # the workflows through a real ComfyUI server
 sbatch slurm/measure_resources.sbatch   # the README's VRAM table
@@ -63,9 +63,9 @@ Write exit criteria into a script's docstring before the run, not after.
 
 ---
 
-## Three sharp edges
+## Four sharp edges
 
-All three cost a debugging session. Each is commented where it bites; this is
+All four cost a debugging session. Each is commented where it bites; this is
 the index.
 
 ### 1. TrajectoryForcing and ComfyUI both own a top-level `utils`
@@ -132,6 +132,62 @@ so a mismatched selection fits perfectly and means something else entirely;
 `check_level` is what catches it, and both edit nodes call it. If you add a node
 that produces selections from regions, set the level.
 
+## Two widgets where one disables the other is the shape to avoid
+
+`which` + `level` and `follow_edit` + `level` were both a mode plus a number the
+mode silently ignored, and ComfyUI's V3 schema has no conditional widget
+visibility to grey the number out. Folding the automatic case into the value
+itself leaves one control that always does something:
+
+- `TF Decode Levels` / `TF Latent Preview`: the dropdown names the level
+  (`level 2`) instead of a `single level` mode plus a separate number.
+- `TF Resume From Level`: `level = -1` means "follow the upstream edit";
+  `follow_edit` is gone.
+- `TF Feature Edit`: `source_level = -1` means "the level being edited".
+
+`auto_level_input` in `sockets.py` builds that widget. Where a capability only a
+deeper model would need had to survive the merge — selecting a level past the
+four every released config has — it lives in `level_override`, which **wins
+whenever it is set** rather than being conditionally ignored. A widget that can
+be ignored is the thing being removed; renaming one would not count.
+
+Rarely-touched settings carry `advanced=True`, which ComfyUI hides behind the
+node's advanced toggle (`Comfy.Node.AlwaysShowAdvancedWidgets`). That halved the
+visible widgets, 41 to 21, without removing anything. Tests assert both the
+ratio and that the knobs people actually turn stay visible.
+
+### `-1` is the one sentinel
+
+Widgets that can work a value out for themselves take `-1` to mean so:
+`TF Resume From Level`'s `level` and `class_id`, `TF Feature Edit`'s
+`source_level`, the `level_override` on the two preview nodes. One convention,
+not three.
+
+A sentinel is only obvious to someone who already knows it, so it is stated in
+three places: `auto_label()` puts `(-1 = auto)` in the widget's `display_name`
+(visible without hovering, which a tooltip is not), the tooltip says what auto
+*does*, and the node's own output says what auto *chose* this run — "auto: the
+level the edit wrote to" versus "set on the node". Tests enforce all three, plus
+that `min == -1` so no second sentinel can creep in below it.
+
+Reach for `auto_level_input` rather than a bare `Int.Input` with a `-1` default.
+
+## Nodes show their own results
+
+Stock ComfyUI ships **no node that displays a STRING** — checked against every
+registered core class. So an `info` output is unreachable: forty-two text and
+number outputs across the four example workflows went nowhere, including
+`TF Levels Info`, whose entire job is to report.
+
+Every node that computes a summary therefore renders it itself, through
+`sockets.node_preview(image=..., text=...)`. It returns a merged dict rather
+than a `_UIOutput` because `PreviewImage` and `PreviewText` each own only their
+own key, and a node with both a picture and a number should show both.
+
+Any node using it needs `has_intermediate_output=True`, or the preview appears
+once and vanishes on the next run when the node is served from cache. A test
+enforces the pairing.
+
 ## Adding a node
 
 1. Put the logic in `tokens.py` or `render.py` if it is pure; only wiring goes
@@ -149,6 +205,28 @@ not paper over a degenerate result either: `TFFeatureEdit` raises on an empty
 target rather than passing it through, because an edit that completes having
 changed nothing is indistinguishable from an edit that had no effect, and that
 is a research error rather than a UI one.
+
+### 4. The Painter's backdrop is a *preview*, not the wire
+
+`usePainter.ts` resolves the image behind the brush with
+`nodeOutputStore.getNodeImageUrls(node.getInputNode(0))` — the stored UI preview
+of whatever feeds its `image` slot. A node that returns an IMAGE but publishes
+no preview leaves the Painter blank, which is why `TF Level Canvas` returns
+`ui.PreviewImage` with `has_intermediate_output=True`. Two consequences: the
+Painter's image input must be socket 0, and the widget itself only exists under
+ComfyUI's Vue rendering (`Comfy.VueNodes.Enabled`, readable from
+`user/*/comfy.settings.json`, which is how the canvas node knows to warn).
+
+### 5. Killing a listener does not free its port
+
+`ncat --keep-open` forks a child per connection and each fork inherits the
+listening socket, so killing the leader leaves the port bound by orphans that
+outlive the session. `serve.sh` runs the bridge under `setsid` and kills the
+**process group**. Anything else that forks per connection needs the same care.
+
+The same background process was also writing to the terminal while `srun --pty`
+held it in raw mode, which produced stair-stepped, half-overwritten output — it
+logs to a file now.
 
 ## Regenerating the workflows and figures
 
@@ -168,6 +246,14 @@ Two things it handles that are easy to get wrong by hand: an `Int` input with
 `control_after_generate` occupies **two** slots in `widgets_values`, and a
 widget wired to a link becomes a converted widget — it keeps its `widgets_values`
 slot *and* gains an `inputs` entry naming the widget.
+
+Layout is computed, not typed. Nodes that display something carry a realistic
+`BODY_HEIGHT` — a `PreviewImage` is ~66px empty and ~430px with an image, and
+sizing for the empty state is what put content outside its group the first time
+anyone ran the graph. Row numbers are an ordering hint: columns are stacked so
+nodes cannot overlap, and group boxes are resolved iteratively afterwards,
+because a group spanning two columns extends as far as its lowest member in
+either and two groups can interleave while no two nodes do.
 
 `MarkdownNote` and groups are frontend-only. Notes are excluded from the API
 payload (the server has no class by that name), and group bounding boxes are

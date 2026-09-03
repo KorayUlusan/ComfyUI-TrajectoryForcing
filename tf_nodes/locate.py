@@ -169,6 +169,39 @@ def download_default_checkpoint() -> str:
     )
 
 
+# ComfyUI's "Node 2.0" (Vue) node rendering. The Painter widget only exists
+# there; under classic LiteGraph rendering it degrades to the text "Node 2.0
+# only" and cannot be painted on at all.
+VUE_NODES_SETTING = "Comfy.VueNodes.Enabled"
+
+
+def vue_nodes_enabled() -> bool | None:
+    """Whether the browser user has Node 2.0 on, or None if it cannot be told.
+
+    Read from ComfyUI's own per-user settings file rather than guessed, so the
+    canvas node can say something specific instead of a blanket warning that
+    would nag the majority who already have it on. Returns None when there is no
+    settings file yet (a fresh install), where nagging would be wrong.
+    """
+    import json
+
+    import folder_paths
+
+    users = Path(folder_paths.get_user_directory())
+    found = None
+    for settings in sorted(users.glob("*/comfy.settings.json")):
+        try:
+            value = json.loads(settings.read_text()).get(VUE_NODES_SETTING)
+        except (OSError, ValueError):
+            continue
+        if value is not None:
+            found = bool(value)
+            # Any user with it off is the one who needs telling.
+            if not found:
+                return False
+    return found
+
+
 def rae_root() -> str:
     """Directory the RAE decoder weights are read from (and downloaded into).
 

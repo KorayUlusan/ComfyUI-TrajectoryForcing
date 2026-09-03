@@ -22,7 +22,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "# 3. Paint the region instead of typing it\n\nSame edit as workflow 2, but you choose the region with a brush.\n\n**This one takes two runs. That is normal, not an error.**\n\n1. **Press Run.** It stops partway with a note in *TF Tokens From Mask* saying\n   nothing is painted yet. The canvas you paint on appears in the **Painter**\n   node and in the preview below it.\n2. **Paint** on the Painter node, over the area you want to change.\n3. **Press Run again.** Now it finishes.\n\nThe grid drawn on the canvas is the 16\u00d716 token grid \u2014 one cell is one token,\nthe smallest thing the edit can address. The yellow lines are region boundaries.\nYour brush stroke is snapped to whole regions, so it does not have to be neat;\ncovering most of a region is enough.\n\nIf it still stops after painting, read the note in *TF Tokens From Mask* \u2014 it\nsays whether you painted too thinly (*coverage*) or across too many regions\n(*region_overlap*).\n"
+        "# 3. Paint the region instead of typing it\n\nSame edit as workflow 2, but you choose the region with a brush.\n\n**This one takes two runs. That is normal, not an error.**\n\n1. **Press Run.** It stops partway with a note in *TF Tokens From Mask* saying\n   nothing is painted yet. The canvas appears **inside the Painter node**, ready\n   to paint over.\n2. **Paint** on the Painter node, over the area you want to change.\n3. **Press Run again.** Now it finishes.\n\n> **If the Painter says \"Node 2.0 only\"** it cannot be painted on: that widget\n> only exists in ComfyUI's new node rendering. Turn it on in **Settings (gear,\n> bottom left) \u2192 search \"Node 2.0\" \u2192 enable**, then reload the page.\n> *TF Level Canvas* also says so if it detects the setting is off.\n> Workflow 02 types coordinates instead and needs none of this.\n\nThe grid drawn on the canvas is the 16\u00d716 token grid \u2014 one cell is one token,\nthe smallest thing the edit can address. The yellow lines are region boundaries.\nYour brush stroke is snapped to whole regions, so it does not have to be neat;\ncovering most of a region is enough.\n\nIf it still stops after painting, read the note in *TF Tokens From Mask* \u2014 it\nsays whether you painted too thinly (*coverage*) or across too many regions\n(*region_overlap*).\n"
       ],
       "color": "#432",
       "bgcolor": "#653",
@@ -237,7 +237,7 @@
       ],
       "size": [
         320,
-        300
+        450
       ],
       "flags": {},
       "order": 5,
@@ -313,11 +313,11 @@
       "type": "PreviewImage",
       "pos": [
         840,
-        800
+        916
       ],
       "size": [
         320,
-        66
+        430
       ],
       "flags": {},
       "order": 6,
@@ -354,7 +354,7 @@
       ],
       "size": [
         320,
-        170
+        620
       ],
       "flags": {},
       "order": 7,
@@ -405,7 +405,7 @@
       ],
       "size": [
         320,
-        170
+        220
       ],
       "flags": {},
       "order": 8,
@@ -522,7 +522,7 @@
       ],
       "size": [
         320,
-        66
+        430
       ],
       "flags": {},
       "order": 10,
@@ -684,7 +684,7 @@
         2,
         "region mean",
         1.0,
-        2
+        -1
       ]
     },
     {
@@ -696,7 +696,7 @@
       ],
       "size": [
         320,
-        222
+        196
       ],
       "flags": {},
       "order": 13,
@@ -737,11 +737,10 @@
         "Node name for S&R": "TFResumeFromLevel"
       },
       "widgets_values": [
-        2,
-        true,
-        -1,
         592,
-        "fixed"
+        "fixed",
+        -1,
+        -1
       ]
     },
     {
@@ -795,8 +794,8 @@
       },
       "widgets_values": [
         "all levels",
-        2,
-        true
+        true,
+        -1
       ]
     },
     {
@@ -808,7 +807,7 @@
       ],
       "size": [
         320,
-        66
+        430
       ],
       "flags": {},
       "order": 15,
@@ -1036,7 +1035,7 @@
         818,
         16,
         1124,
-        872
+        1352
       ],
       "color": "#b58b2a",
       "font_size": 24,
@@ -1062,7 +1061,7 @@
         2718,
         16,
         744,
-        256
+        516
       ],
       "color": "#8A8",
       "font_size": 24,

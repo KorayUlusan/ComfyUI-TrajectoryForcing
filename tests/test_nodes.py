@@ -94,6 +94,22 @@ def node_classes(extension):
     return nodes()
 
 
+def ui_text(out) -> str:
+    """What the node shows in its own body.
+
+    `ui` is a plain dict rather than a _UIOutput because a node that produces
+    both a picture and a number should show both, and each preview class owns
+    only its own key.
+    """
+    payload = out.ui.as_dict() if hasattr(out.ui, "as_dict") else (out.ui or {})
+    return " ".join(payload.get("text", ()))
+
+
+def ui_images(out) -> list:
+    payload = out.ui.as_dict() if hasattr(out.ui, "as_dict") else (out.ui or {})
+    return list(payload.get("images", ()))
+
+
 def node(node_classes, node_id):
     for cls in node_classes:
         if cls.define_schema().node_id == node_id:
@@ -140,7 +156,7 @@ class TestSchemas:
         for cls in node_classes:
             schema = cls.define_schema()
             assert schema.description, f"{schema.node_id} has no description"
-            assert schema.category == "TrajectoryForcing"
+            assert schema.category.startswith("TrajectoryForcing")
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +184,11 @@ class TestGenerateAndDecode:
         assert chosen == f"213 - {name}"
 
     @pytest.mark.parametrize(
-        "which,expected", [("all levels", LEVELS), ("final level only", 1), ("single level", 1)]
+        "which,expected", [("all levels", LEVELS), ("final level only", 1), ("level 1", 1)]
     )
     def test_decode_frame_counts(self, node_classes, pipeline, levels, which, expected):
         images, _ = node(node_classes, "TFDecode").execute(
-            pipeline=pipeline, levels=levels, which=which, level=1, label_levels=False
+            pipeline=pipeline, levels=levels, which=which, label_levels=False, level_override=-1
         )
         assert isinstance(images, torch.Tensor)
         assert images.shape[0] == expected
@@ -181,10 +197,10 @@ class TestGenerateAndDecode:
 
     def test_decode_captions_add_a_strip(self, node_classes, pipeline, levels):
         plain, _ = node(node_classes, "TFDecode").execute(
-            pipeline=pipeline, levels=levels, which="all levels", level=0, label_levels=False
+            pipeline=pipeline, levels=levels, which="all levels", label_levels=False, level_override=-1
         )
         labelled, _ = node(node_classes, "TFDecode").execute(
-            pipeline=pipeline, levels=levels, which="all levels", level=0, label_levels=True
+            pipeline=pipeline, levels=levels, which="all levels", label_levels=True, level_override=-1
         )
         assert labelled.shape[1] > plain.shape[1]
         assert labelled.shape[2] == plain.shape[2]
@@ -192,28 +208,28 @@ class TestGenerateAndDecode:
     def test_decode_warns_when_the_stack_is_stale(self, node_classes, pipeline, levels):
         edited = levels.with_level(1, levels.level(1), "edit")
         _, warning = node(node_classes, "TFDecode").execute(
-            pipeline=pipeline, levels=edited, which="all levels", level=0, label_levels=False
+            pipeline=pipeline, levels=edited, which="all levels", label_levels=False, level_override=-1
         )
         assert "stale" in warning
 
     def test_decode_of_a_level_below_the_edit_does_not_warn(self, node_classes, pipeline, levels):
         edited = levels.with_level(2, levels.level(2), "edit")
         _, warning = node(node_classes, "TFDecode").execute(
-            pipeline=pipeline, levels=edited, which="single level", level=1, label_levels=False
+            pipeline=pipeline, levels=edited, which="level 1", label_levels=False, level_override=-1
         )
         assert warning == ""
 
     def test_latent_preview_fits_the_requested_size(self, node_classes, pipeline, levels):
         images, = node(node_classes, "TFLatentPreview").execute(
-            pipeline=pipeline, levels=levels, which="all levels", level=0, size=256,
-            label_levels=False, palette_from=None,
+            pipeline=pipeline, levels=levels, which="all levels", size=256,
+            label_levels=False, level_override=-1, palette_from=None,
         )
         assert images.shape == (LEVELS, 256, 256, 3)
 
     def test_palette_from_fits_jointly(self, node_classes, pipeline, levels):
         node(node_classes, "TFLatentPreview").execute(
-            pipeline=pipeline, levels=levels, which="all levels", level=0, size=128,
-            label_levels=False, palette_from=levels,
+            pipeline=pipeline, levels=levels, which="all levels", size=128,
+            label_levels=False, level_override=-1, palette_from=levels,
         )
         assert ("fit_palette", 2) in pipeline.calls
         assert ("pca_tiles", True) in pipeline.calls
@@ -276,7 +292,7 @@ class TestRegionNodes:
         )
         assert all(isinstance(r, ExecutionBlocker) for r in out.result)
         assert all(r.message is None for r in out.result), "a message blocks loudly"
-        return " ".join(out.ui.as_dict()["text"])
+        return ui_text(out)
 
     def test_an_unpainted_mask_stops_quietly_and_says_why(self, node_classes, levels):
         cls = node(node_classes, "TFTokensFromMask")
@@ -322,7 +338,7 @@ class TestRegionNodes:
         )
         assert out.block_execution is None
         assert out[1] == 1
-        assert "1 tokens selected" in " ".join(out.ui.as_dict()["text"])
+        assert "1 tokens selected" in ui_text(out)
 
     def test_tokens_from_coords(self, node_classes, levels):
         tokens, count, _ = node(node_classes, "TFTokensFromCoords").execute(
@@ -503,7 +519,7 @@ class TestResume:
     def test_resume_follows_the_edit(self, node_classes, pipeline, levels):
         edited = self._edited(node_classes, levels, level=1)
         out, info = node(node_classes, "TFResumeFromLevel").execute(
-            pipeline=pipeline, levels=edited, level=0, follow_edit=True, class_id=-1, seed=5
+            pipeline=pipeline, levels=edited, level=-1, class_id=-1, seed=5
         )
         assert ("resume", 1, 213, 5) in pipeline.calls, "the edit's level and the stack's class win"
         assert out.dirty_level is None
@@ -512,7 +528,7 @@ class TestResume:
     def test_resume_keeps_levels_below_l_star(self, node_classes, pipeline, levels):
         edited = self._edited(node_classes, levels, level=2)
         out, _ = node(node_classes, "TFResumeFromLevel").execute(
-            pipeline=pipeline, levels=edited, level=0, follow_edit=True, class_id=-1, seed=5
+            pipeline=pipeline, levels=edited, level=-1, class_id=-1, seed=5
         )
         for below in (0, 1, 2):
             np.testing.assert_allclose(out.level(below), edited.level(below))
@@ -520,14 +536,14 @@ class TestResume:
 
     def test_resume_can_override_the_class(self, node_classes, pipeline, levels):
         node(node_classes, "TFResumeFromLevel").execute(
-            pipeline=pipeline, levels=levels, level=1, follow_edit=False, class_id=77, seed=2
+            pipeline=pipeline, levels=levels, level=1, class_id=77, seed=2
         )
         assert ("resume", 1, 77, 2) in pipeline.calls
 
-    def test_follow_edit_without_an_edit_is_an_error(self, node_classes, pipeline, levels):
+    def test_resuming_with_nothing_to_follow_is_an_error(self, node_classes, pipeline, levels):
         with pytest.raises(ValueError, match="no edit to follow"):
             node(node_classes, "TFResumeFromLevel").execute(
-                pipeline=pipeline, levels=levels, level=1, follow_edit=True, class_id=-1, seed=1
+                pipeline=pipeline, levels=levels, level=-1, class_id=-1, seed=1
             )
 
     def test_resuming_above_a_pending_edit_keeps_it_marked_stale(self, node_classes, pipeline, levels):
@@ -535,20 +551,20 @@ class TestResume:
         # down is still unpropagated -- clearing the marker would hide that.
         edited = self._edited(node_classes, levels, level=1)
         out, _ = node(node_classes, "TFResumeFromLevel").execute(
-            pipeline=pipeline, levels=edited, level=2, follow_edit=False, class_id=-1, seed=5
+            pipeline=pipeline, levels=edited, level=2, class_id=-1, seed=5
         )
         assert out.dirty_level == 1
 
     def test_resuming_below_a_pending_edit_settles_it(self, node_classes, pipeline, levels):
         edited = self._edited(node_classes, levels, level=2)
         out, _ = node(node_classes, "TFResumeFromLevel").execute(
-            pipeline=pipeline, levels=edited, level=1, follow_edit=False, class_id=-1, seed=5
+            pipeline=pipeline, levels=edited, level=1, class_id=-1, seed=5
         )
         assert out.dirty_level is None
 
     def test_resuming_at_the_last_level_says_so(self, node_classes, pipeline, levels):
         _, info = node(node_classes, "TFResumeFromLevel").execute(
-            pipeline=pipeline, levels=levels, level=LEVELS - 1, follow_edit=False, class_id=-1, seed=1
+            pipeline=pipeline, levels=levels, level=LEVELS - 1, class_id=-1, seed=1
         )
         assert "nothing above it" in info
 
@@ -601,14 +617,14 @@ class TestPipelineTravelsWithTheTrajectory:
         stack, = node(node_classes, "TFGenerate").execute(
             pipeline=pipeline, class_id=1, seed=1)
         images, _ = node(node_classes, "TFDecode").execute(
-            levels=stack, which="all levels", level=0, label_levels=False)
+            levels=stack, which="all levels", label_levels=False, level_override=-1)
         assert images.shape[0] == LEVELS
 
     def test_resume_passes_it_on(self, node_classes, pipeline):
         stack, = node(node_classes, "TFGenerate").execute(
             pipeline=pipeline, class_id=1, seed=1)
         out, _ = node(node_classes, "TFResumeFromLevel").execute(
-            levels=stack, level=1, follow_edit=False, class_id=-1, seed=2)
+            levels=stack, level=1, class_id=-1, seed=2)
         assert out.pipeline is pipeline
 
     def test_an_explicit_pipeline_overrides_the_carried_one(self, node_classes, pipeline):
@@ -616,8 +632,8 @@ class TestPipelineTravelsWithTheTrajectory:
         stack, = node(node_classes, "TFGenerate").execute(
             pipeline=pipeline, class_id=1, seed=1)
         node(node_classes, "TFDecode").execute(
-            levels=stack, which="final level only", level=0,
-            label_levels=False, pipeline=other)
+            levels=stack, which="final level only", label_levels=False,
+            level_override=-1, pipeline=other)
         assert any(c[0] == "generate" for c in pipeline.calls)
         assert not other.calls, "decode uses no recorded call, but the override must be the one used"
 
@@ -626,7 +642,7 @@ class TestPipelineTravelsWithTheTrajectory:
         assert levels.pipeline is None
         with pytest.raises(ValueError, match="Wire TF Load Pipeline"):
             node(node_classes, "TFDecode").execute(
-                levels=levels, which="all levels", level=0, label_levels=False)
+                levels=levels, which="all levels", label_levels=False, level_override=-1)
 
 
 class TestLevelAgreement:
@@ -733,7 +749,7 @@ class TestCompareLevels:
             levels=before, level=level, target_tokens=target, source_tokens=source,
             source_mode="region mean", strength=1.0, source_level=level, source_levels=None)
         after, _ = node(node_classes, "TFResumeFromLevel").execute(
-            levels=edited, level=level, follow_edit=True, class_id=-1, seed=1)
+            levels=edited, level=-1, class_id=-1, seed=1)
         return before, after
 
     def test_identical_trajectories_report_no_change(self, node_classes, pipeline):
@@ -802,3 +818,251 @@ class TestCompareLevels:
         assert changed == 1
         assert np.isfinite(peak) and peak == 1.0
         assert "nan" not in report.lower()
+
+
+class TestOneWidgetInsteadOfTwo:
+    """`which` + `level` and `follow_edit` + `level` were both a mode plus a
+    number the mode silently ignored. Each is now a single control that always
+    does something, with the automatic case folded into the value itself."""
+
+    def test_the_dropdown_names_the_level_directly(self, node_classes, pipeline, levels):
+        images, _ = node(node_classes, "TFDecode").execute(
+            pipeline=pipeline, levels=levels, which="level 1",
+            label_levels=False, level_override=-1)
+        assert images.shape[0] == 1
+
+    def test_the_dropdown_covers_every_shipped_level(self, node_classes):
+        from tf_nodes.sockets import SHIPPED_LEVELS
+
+        options = next(i for i in node(node_classes, "TFDecode").define_schema().inputs
+                       if i.id == "which").options
+        assert options[:2] == ["all levels", "final level only"]
+        assert options[2:] == [f"level {i}" for i in range(SHIPPED_LEVELS)]
+
+    def test_the_override_wins_and_so_is_never_dead(self, node_classes, pipeline, levels):
+        # It exists only for a model deeper than any released one, so it must
+        # take effect whatever the dropdown says -- otherwise it is the same
+        # ignorable widget under a new name.
+        images, _ = node(node_classes, "TFDecode").execute(
+            pipeline=pipeline, levels=levels, which="all levels",
+            label_levels=False, level_override=3)
+        assert images.shape[0] == 1
+
+    def test_resume_follows_the_edit_when_left_alone(self, node_classes, pipeline, levels):
+        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=levels)
+        edited, _ = node(node_classes, "TFFeatureEdit").execute(
+            levels=levels, level=1, target_tokens=selection, source_tokens=selection,
+            source_mode="region mean", strength=1.0, source_level=-1, source_levels=None)
+        _, info = node(node_classes, "TFResumeFromLevel").execute(
+            pipeline=pipeline, levels=edited, level=-1, class_id=-1, seed=5)
+        assert "resume from level 1" in info
+
+    def test_a_set_level_overrides_the_edit(self, node_classes, pipeline, levels):
+        _, info = node(node_classes, "TFResumeFromLevel").execute(
+            pipeline=pipeline, levels=levels, level=2, class_id=-1, seed=5)
+        assert "resume from level 2" in info
+
+    def test_source_level_defaults_to_the_edit_level(self, node_classes, levels):
+        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=levels)
+        _, info = node(node_classes, "TFFeatureEdit").execute(
+            levels=levels, level=3, target_tokens=selection, source_tokens=selection,
+            source_mode="region mean", strength=1.0, source_level=-1, source_levels=None)
+        assert "at level 3" in info and "level 2" not in info
+
+
+class TestAdvancedWidgets:
+    """Rarely-touched settings are hidden behind ComfyUI's advanced toggle
+    rather than removed: the surface shrinks, the capability does not."""
+
+    def test_roughly_half_the_widgets_are_out_of_the_way(self, node_classes):
+        visible = advanced = 0
+        for cls in node_classes:
+            for i in cls.define_schema().inputs:
+                if not hasattr(i, "default"):
+                    continue
+                if i.advanced:
+                    advanced += 1
+                else:
+                    visible += 1
+        assert advanced >= visible * 0.6, f"{visible} visible vs {advanced} advanced"
+
+    def test_the_knobs_you_actually_turn_stay_visible(self, node_classes):
+        must_be_visible = {
+            "TFGenerate": {"class_id", "seed"},
+            "TFFeatureEdit": {"level", "strength"},
+            "TFRegionMap": {"level", "cosine_threshold"},
+            "TFTokensFromCoords": {"coords"},
+            "TFTokensFromMask": {"coverage", "region_overlap"},
+            "TFDecode": {"which"},
+        }
+        for cls in node_classes:
+            schema = cls.define_schema()
+            wanted = must_be_visible.get(schema.node_id)
+            if not wanted:
+                continue
+            shown = {i.id for i in schema.inputs if hasattr(i, "default") and not i.advanced}
+            assert wanted <= shown, f"{schema.node_id} hides {wanted - shown}"
+
+
+class TestEveryNodeShowsItsOwnResult:
+    """Stock ComfyUI has no node that displays a STRING.
+
+    Verified against every registered core class: an `info` output is
+    unreachable unless the node that computed it shows it itself. Before this,
+    forty-two text and number outputs across the four example workflows went
+    nowhere, including TF Levels Info's entire reason to exist.
+    """
+
+    TEXT_PRODUCERS = {
+        "TFLoadPipeline", "TFImageNetClass", "TFLevelsInfo", "TFDecode",
+        "TFLatentPreview", "TFRegionMap", "TFTokensFromMask", "TFTokensFromCoords",
+        "TFTokensCombine", "TFTokensPreview", "TFFeatureEdit", "TFShapeEdit",
+        "TFResumeFromLevel", "TFCompareLevels", "TFSaveLevels", "TFLoadLevels",
+    }
+
+    def test_they_all_declare_a_string_output_or_show_text(self, node_classes):
+        for cls in node_classes:
+            schema = cls.define_schema()
+            if schema.node_id not in self.TEXT_PRODUCERS:
+                continue
+            assert schema.has_intermediate_output, (
+                f"{schema.node_id} shows text, so its preview must survive a cached re-run")
+
+    def test_the_edit_summary_is_visible(self, node_classes, levels, pipeline):
+        target, _, _ = node(node_classes, "TFTokensFromCoords").execute(coords="1,1", levels=levels)
+        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(coords="5,5", levels=levels)
+        out = node(node_classes, "TFFeatureEdit").execute(
+            levels=levels, level=2, target_tokens=target, source_tokens=source,
+            source_mode="region mean", strength=1.0, source_level=2, source_levels=None)
+        assert "feature edit" in ui_text(out)
+        assert ui_text(out) == out[1], "what it shows and what it outputs must agree"
+
+    def test_levels_info_is_not_an_inert_box(self, node_classes, pipeline):
+        stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=213, seed=1)
+        out = node(node_classes, "TFLevelsInfo").execute(levels=stack)
+        shown = ui_text(out)
+        assert "Irish setter" in shown and "seed" in shown
+
+    def test_region_map_shows_its_count_and_its_picture(self, node_classes, two_region_levels):
+        out = node(node_classes, "TFRegionMap").execute(
+            levels=two_region_levels, level=2, cosine_threshold=0.9, size=128)
+        assert "2 regions at level 2" in ui_text(out)
+        assert len(ui_images(out)) == 1, "the map is the point of the node"
+
+    def test_compare_shows_both_the_table_and_the_heatmap(self, node_classes, pipeline):
+        stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=1, seed=1)
+        out = node(node_classes, "TFCompareLevels").execute(
+            before=stack, after=stack, size=256, decode_difference=False)
+        assert "tokens changed" in ui_text(out)
+        assert len(ui_images(out)) == LEVELS
+
+    def test_the_canvas_publishes_its_image_for_the_painter(self, node_classes, pipeline):
+        # The Painter takes its backdrop from the upstream node's stored preview.
+        stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=1, seed=1)
+        out = node(node_classes, "TFLevelCanvas").execute(
+            levels=stack, level=2, view="latent PCA", draw_grid=True,
+            label_coords=True, size=256, regions=None, highlight=None)
+        assert len(ui_images(out)) == 1
+
+    def test_tokens_preview_shows_the_selection_it_drew(self, node_classes, levels):
+        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="2,3", levels=levels)
+        out = node(node_classes, "TFTokensPreview").execute(tokens=selection, size=128)
+        assert len(ui_images(out)) == 1
+        assert "2,3" in ui_text(out)
+
+
+class TestDiscoverability:
+    def test_every_node_has_search_aliases(self, node_classes):
+        # ComfyUI's node search matches the display name and these. Without them
+        # "paint", "mask" or "diff" find nothing, and the name has to be known
+        # before it can be looked up.
+        for cls in node_classes:
+            schema = cls.define_schema()
+            assert schema.search_aliases, f"{schema.node_id} has no search aliases"
+
+    def test_aliases_are_lowercase_and_distinct(self, node_classes):
+        for cls in node_classes:
+            aliases = cls.define_schema().search_aliases
+            assert aliases == [a.lower() for a in aliases]
+            assert len(set(aliases)) == len(aliases)
+
+    def test_nodes_are_grouped_into_subcategories(self, node_classes):
+        # Eighteen nodes in one flat menu is a scroll.
+        categories = {c.define_schema().category for c in node_classes}
+        assert len(categories) >= 4
+        assert all(c.startswith("TrajectoryForcing") for c in categories)
+
+    def test_the_class_picker_defaults_to_the_same_class_as_generate(self, node_classes):
+        # Two nodes that are normally wired together should not disagree about
+        # what a default run produces.
+        picker = node(node_classes, "TFImageNetClass").define_schema().inputs[0].default
+        generate = next(i for i in node(node_classes, "TFGenerate").define_schema().inputs
+                        if i.id == "class_id").default
+        assert picker.startswith(f"{generate} - ")
+
+
+class TestTheAutoConvention:
+    """Every widget that can decide for itself uses -1, says so on its label,
+    and reports what it decided. A sentinel is only obvious to someone who
+    already knows the convention."""
+
+    def _auto_widgets(self, node_classes):
+        for cls in node_classes:
+            schema = cls.define_schema()
+            for i in schema.inputs:
+                if getattr(i, "default", None) == -1:
+                    yield schema.node_id, i
+
+    def test_there_are_some(self, node_classes):
+        assert list(self._auto_widgets(node_classes)), "the convention needs users to matter"
+
+    def test_the_label_states_it_without_hovering(self, node_classes):
+        from tf_nodes.sockets import AUTO_SUFFIX
+
+        for node_id, widget in self._auto_widgets(node_classes):
+            assert widget.display_name, f"{node_id}.{widget.id} shows only its bare id"
+            assert widget.display_name.endswith(AUTO_SUFFIX), (
+                f"{node_id}.{widget.id} label is {widget.display_name!r}")
+
+    def test_the_tooltip_says_what_auto_does(self, node_classes):
+        for node_id, widget in self._auto_widgets(node_classes):
+            assert "auto" in (widget.tooltip or "").lower(), f"{node_id}.{widget.id}"
+
+    def test_minus_one_is_the_only_sentinel_value(self, node_classes):
+        # Three meanings would be three conventions to learn; one is enough.
+        from tf_nodes.sockets import AUTO
+
+        for node_id, widget in self._auto_widgets(node_classes):
+            assert widget.min == AUTO, f"{node_id}.{widget.id} allows values below the sentinel"
+
+    def test_resume_reports_what_auto_chose(self, node_classes, pipeline, levels):
+        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=levels)
+        edited, _ = node(node_classes, "TFFeatureEdit").execute(
+            levels=levels, level=1, target_tokens=selection, source_tokens=selection,
+            source_mode="region mean", strength=1.0, source_level=-1, source_levels=None)
+        _, info = node(node_classes, "TFResumeFromLevel").execute(
+            pipeline=pipeline, levels=edited, level=-1, class_id=-1, seed=5)
+        assert "auto: the level the edit wrote to" in info
+        assert "auto: the trajectory's own" in info
+
+    def test_a_value_set_by_hand_is_reported_as_such(self, node_classes, pipeline, levels):
+        _, info = node(node_classes, "TFResumeFromLevel").execute(
+            pipeline=pipeline, levels=levels, level=2, class_id=7, seed=5)
+        assert "set on the node" in info
+        assert "auto" not in info
+
+    def test_feature_edit_says_when_the_source_level_was_auto(self, node_classes, levels):
+        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=levels)
+        _, auto = node(node_classes, "TFFeatureEdit").execute(
+            levels=levels, level=2, target_tokens=selection, source_tokens=selection,
+            source_mode="region mean", strength=1.0, source_level=-1, source_levels=None)
+        _, explicit = node(node_classes, "TFFeatureEdit").execute(
+            levels=levels, level=2, target_tokens=selection, source_tokens=selection,
+            source_mode="region mean", strength=1.0, source_level=2, source_levels=None)
+        assert "auto: same as the edit" in auto
+        assert "auto" not in explicit

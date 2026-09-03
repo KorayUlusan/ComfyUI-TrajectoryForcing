@@ -113,10 +113,9 @@
         "8",
         0
       ],
-      "level": 2,
-      "follow_edit": true,
-      "class_id": -1,
-      "seed": 592
+      "seed": 592,
+      "level": -1,
+      "class_id": -1
     },
     "_meta": {
       "title": "TF Resume From Level"
@@ -130,8 +129,8 @@
         0
       ],
       "which": "all levels",
-      "level": 2,
-      "label_levels": true
+      "label_levels": true,
+      "level_override": -1
     },
     "_meta": {
       "title": "TF Decode Levels"

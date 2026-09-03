@@ -44,8 +44,8 @@
         0
       ],
       "which": "all levels",
-      "level": 2,
-      "label_levels": true
+      "label_levels": true,
+      "level_override": -1
     },
     "_meta": {
       "title": "TF Decode Levels"
@@ -59,9 +59,9 @@
         0
       ],
       "which": "all levels",
-      "level": 2,
       "size": 512,
-      "label_levels": true
+      "label_levels": true,
+      "level_override": -1
     },
     "_meta": {
       "title": "TF Latent Preview (PCA)"

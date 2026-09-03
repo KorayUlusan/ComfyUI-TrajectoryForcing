@@ -54,6 +54,21 @@ GROUP_TITLE_SPACE = 42  # room for the group's own title bar above them
 # in both the light and dark themes.
 GROUP_COLOURS = ["#3f789e", "#88A", "#8A8", "#a1309b", "#b58b2a", "#3f789e"]
 
+# Minimum height for nodes that display something in their body once the graph
+# has run. A node sized for its empty state overflows its group and collides
+# with its neighbour the moment an image arrives, and the first time anyone sees
+# the workflow is usually *after* pressing Run.
+BODY_HEIGHT = {
+    "PreviewImage": 430,      # a 512px image scaled into a 320-wide node, plus chrome
+    "Painter": 620,           # its canvas widget plus the brush controls beneath
+    "TFLevelCanvas": 450,     # publishes a preview so Painter has a backdrop
+    "TFDecode": 150,          # ui.PreviewText: a couple of lines
+    "TFLatentPreview": 150,
+    "TFCompareLevels": 260,   # a per-level table
+    "TFTokensFromMask": 220,  # the "nothing painted yet" instruction
+}
+ROW_GAP = 26                  # vertical breathing room between stacked nodes
+
 
 class Graph:
     """Collects nodes and links, then serialises to both workflow formats."""
@@ -64,6 +79,7 @@ class Graph:
         self.nodes: list[dict] = []
         self.links: list[list] = []
         self.groups: list[dict] = []
+        self._group_specs: list[tuple[str, list[int], str]] = []
         # The API payload is built alongside the LiteGraph one rather than
         # derived from it afterwards: reconstructing which slot a value came
         # from means re-deriving the widget/socket split a second time, and the
@@ -99,26 +115,95 @@ class Graph:
         return node_id
 
     def group(self, title: str, members: list[int], colour: str = "") -> None:
-        """Box and label a set of nodes, sized from where they actually ended up.
+        """Box and label a set of nodes.
 
-        Computed rather than written down: a group whose bounding box was typed
-        by hand drifts off its nodes the moment one moves, and a group that no
-        longer contains its nodes is worse than no group at all -- dragging it
-        then leaves them behind.
+        The box is computed from where the members end up, not written down: a
+        hand-typed bounding box drifts off its nodes the moment one moves, and a
+        group that no longer contains its nodes leaves them behind when dragged.
+        Resolved in `_layout`, after nodes have been spaced apart, since that is
+        the first point at which the final positions are known.
         """
+        self._group_specs.append((title, list(members),
+                                  colour or GROUP_COLOURS[len(self._group_specs) % len(GROUP_COLOURS)]))
+
+    def _stack_columns(self, group_of: dict[int, int]) -> None:
+        """Push nodes down a column until none overlaps the one above it."""
+        # Two nodes from different groups need room for both group borders and
+        # the lower one's title bar between them, or the boxes overlap even
+        # though the nodes do not -- and an overlapping group picks up its
+        # neighbour's nodes when dragged.
+        across_groups = 2 * GROUP_PAD + GROUP_TITLE_SPACE + ROW_GAP
+        for column in {n["pos"][0] for n in self.nodes}:
+            in_column = sorted((n for n in self.nodes if n["pos"][0] == column),
+                               key=lambda n: n["pos"][1])
+            previous = None
+            for node in in_column:
+                if previous is not None:
+                    gap = (across_groups
+                           if group_of.get(node["id"]) != group_of.get(previous["id"])
+                           else ROW_GAP)
+                    node["pos"][1] = max(
+                        node["pos"][1], previous["pos"][1] + previous["size"][1] + gap)
+                previous = node
+
+    def _box(self, members: list[int]) -> list[int]:
         boxes = [self.nodes[i - 1] for i in members]
         left = min(n["pos"][0] for n in boxes) - GROUP_PAD
         top = min(n["pos"][1] for n in boxes) - GROUP_PAD - GROUP_TITLE_SPACE
         right = max(n["pos"][0] + n["size"][0] for n in boxes) + GROUP_PAD
         bottom = max(n["pos"][1] + n["size"][1] for n in boxes) + GROUP_PAD
-        self.groups.append({
-            "id": len(self.groups) + 1,
-            "title": title,
-            "bounding": [left, top, right - left, bottom - top],
-            "color": colour or GROUP_COLOURS[len(self.groups) % len(GROUP_COLOURS)],
-            "font_size": 24,
-            "flags": {},
-        })
+        return [left, top, right - left, bottom - top]
+
+    def _layout(self) -> None:
+        """Space the nodes out, then box the groups.
+
+        Row numbers in the builders are an ordering hint. Honouring them
+        literally means predicting every node height by hand, and one node
+        growing an image preview then silently overlaps the next -- which is
+        what happened. A node keeps its requested row when there is room and is
+        pushed down when there is not.
+
+        Column stacking alone is not enough for the groups: a group spanning two
+        columns extends as far as its lowest member in *either*, so two groups
+        can interleave while no two nodes overlap. The loop settles that by
+        pushing a whole group down and re-stacking, which can in turn move
+        something else -- hence iterating rather than a single pass.
+        """
+        group_of = {}
+        for index, (_, members, _) in enumerate(self._group_specs):
+            for member in members:
+                group_of[member] = index
+
+        for _ in range(len(self._group_specs) + 2):
+            self._stack_columns(group_of)
+            boxes = [self._box(members) for _, members, _ in self._group_specs]
+            moved = False
+            for lower in range(len(boxes)):
+                for upper in range(lower):
+                    ax, ay, aw, ah = boxes[upper]
+                    bx, by, bw, bh = boxes[lower]
+                    overlap_x = min(ax + aw, bx + bw) - max(ax, bx)
+                    overlap_y = min(ay + ah, by + bh) - max(ay, by)
+                    if overlap_x > 0 and overlap_y > 0:
+                        shift = (ay + ah) - by + ROW_GAP
+                        for member in self._group_specs[lower][1]:
+                            self.nodes[member - 1]["pos"][1] += shift
+                        boxes[lower] = self._box(self._group_specs[lower][1])
+                        moved = True
+            if not moved:
+                break
+
+        self.groups = [
+            {
+                "id": index + 1,
+                "title": title,
+                "bounding": self._box(members),
+                "color": colour,
+                "font_size": 24,
+                "flags": {},
+            }
+            for index, (title, members, colour) in enumerate(self._group_specs)
+        ]
 
     def add(self, node_type: str, column: int, row: int, title: str = "", **values) -> int:
         """Place a node. `values` sets widget values by input id and wires links.
@@ -170,7 +255,9 @@ class Graph:
             "id": node_id,
             "type": node_type,
             "pos": [80 + column * COLUMN, 80 + row * ROW],
-            "size": [COLUMN - 60, 40 + 26 * (len(inputs) + len(widgets))],
+            "size": [COLUMN - 60,
+                     max(40 + 26 * (len(inputs) + len(widgets)),
+                         BODY_HEIGHT.get(node_type, 0))],
             "flags": {},
             "order": node_id - 1,
             "mode": 0,
@@ -192,6 +279,7 @@ class Graph:
         return node_id
 
     def as_workflow(self) -> dict:
+        self._layout()
         return {
             "id": f"trajectory-forcing-{self.name}",
             "revision": 0,
@@ -437,6 +525,10 @@ makes the change *fit* rather than pasting a rectangle.
 
 Levels below the edit are untouched — an edit only ever propagates upward.
 
+**Advanced widgets show `(-1 = auto)`** — that means the node works the value
+out for itself, and it prints which it chose. Leave them alone unless you want
+something specific.
+
 **Try, in the yellow group:**
 - *target region*: change `7,7` to another `row,col` on the 16×16 grid. It snaps
   to the whole region containing that token. Every preview here is numbered
@@ -485,12 +577,11 @@ wrong part of the image without complaining.
     edit = g.add(
         "TFFeatureEdit", 3, 0,
         levels=(target, 0), level=(regions, 3), target_tokens=(tgt_tokens, 0),
-        source_tokens=(src_tokens, 0), source_mode="region mean", strength=1.0,
-        source_level=2, source_levels=(source, 0),
+        source_tokens=(src_tokens, 0), source_mode="region mean", strength=1.0, source_levels=(source, 0),
     )
     resume = g.add(
         "TFResumeFromLevel", 4, 0,
-        levels=(edit, 0), follow_edit=True, class_id=-1, seed=592,
+        levels=(edit, 0), class_id=-1, seed=592,
     )
     g.group("3 · Apply it, then re-sample the finer levels", [edit, resume], colour="#a1309b")
 
@@ -530,10 +621,16 @@ Same edit as workflow 2, but you choose the region with a brush.
 **This one takes two runs. That is normal, not an error.**
 
 1. **Press Run.** It stops partway with a note in *TF Tokens From Mask* saying
-   nothing is painted yet. The canvas you paint on appears in the **Painter**
-   node and in the preview below it.
+   nothing is painted yet. The canvas appears **inside the Painter node**, ready
+   to paint over.
 2. **Paint** on the Painter node, over the area you want to change.
 3. **Press Run again.** Now it finishes.
+
+> **If the Painter says "Node 2.0 only"** it cannot be painted on: that widget
+> only exists in ComfyUI's new node rendering. Turn it on in **Settings (gear,
+> bottom left) → search "Node 2.0" → enable**, then reload the page.
+> *TF Level Canvas* also says so if it detects the setting is off.
+> Workflow 02 types coordinates instead and needs none of this.
 
 The grid drawn on the canvas is the 16×16 token grid — one cell is one token,
 the smallest thing the edit can address. The yellow lines are region boundaries.
@@ -584,11 +681,10 @@ says whether you painted too thinly (*coverage*) or across too many regions
     edit = g.add(
         "TFFeatureEdit", 5, 0,
         levels=(target, 0), level=(regions, 3), target_tokens=(tgt_tokens, 0),
-        source_tokens=(src_tokens, 0), source_mode="region mean", strength=1.0,
-        source_level=2, source_levels=(source, 0),
+        source_tokens=(src_tokens, 0), source_mode="region mean", strength=1.0, source_levels=(source, 0),
     )
     resume = g.add("TFResumeFromLevel", 6, 0, levels=(edit, 0),
-                   follow_edit=True, class_id=-1, seed=592)
+                   class_id=-1, seed=592)
     g.group("3 · Apply it, then re-sample the finer levels", [src_tokens, edit, resume],
             colour="#a1309b")
 
@@ -649,7 +745,7 @@ are, then pick coordinates on either side of one.
         boundary_tokens=(boundary, 0), receiving_tokens=(receiving, 0), strength=1.0,
     )
     resume = g.add("TFResumeFromLevel", 5, 0, levels=(edit, 0),
-                   follow_edit=True, class_id=-1, seed=592)
+                   class_id=-1, seed=592)
     g.group("3 · Move the boundary, then re-sample", [edit, resume], colour="#a1309b")
 
     after = g.add("TFDecode", 6, 0, levels=(resume, 0), which="all levels")

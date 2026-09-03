@@ -30,18 +30,68 @@ TIME_LIMIT="${TF_TIME:-08:00:00}"
 
 command -v ncat >/dev/null || { echo "ERROR: ncat not found; it is what bridges this node to the job." >&2; exit 1; }
 
+# --- clear our own leftovers, then find a port that is actually free ---------
+# `ncat --keep-open` forks a child per connection and each fork inherits the
+# listening socket, so killing the parent alone leaves the port bound by
+# orphans -- which is what used to happen, and why a later run failed with
+# "Address already in use" pointing at a compute node whose job had long ended.
+# The bridge now runs in its own process group and is killed by group; this
+# sweep clears anything left behind by a version that did not.
+sweep_stale_bridges() {
+  local pid cmdline node stale=()
+  for pid in $(pgrep -u "$USER" -x ncat 2>/dev/null || true); do
+    cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+    node=$(grep -oE 'mlcbm[0-9]+' <<<"$cmdline" | head -1 || true)
+    # Only ours, and only when no job of ours is still on that node.
+    [[ -z "$node" ]] && continue
+    if ! squeue -h -u "$USER" -t R -o "%N" 2>/dev/null | grep -qx "$node"; then
+      stale+=("$pid")
+    fi
+  done
+  if (( ${#stale[@]} )); then
+    echo "Clearing ${#stale[@]} leftover bridge process(es) from an earlier session."
+    kill "${stale[@]}" 2>/dev/null || true
+    sleep 1
+    kill -9 "${stale[@]}" 2>/dev/null || true
+  fi
+}
+
+port_free() { ! ss -ltn "sport = :$1" 2>/dev/null | grep -q LISTEN; }
+
+sweep_stale_bridges
+if ! port_free "$PORT"; then
+  original="$PORT"
+  while ! port_free "$PORT" && (( PORT < original + 20 )); do PORT=$((PORT + 1)); done
+  if ! port_free "$PORT"; then
+    echo "ERROR: ports $original..$PORT are all in use on this node." >&2
+    echo "       Something else is listening -- check: ss -ltnp | grep $original" >&2
+    exit 1
+  fi
+  echo "Port $original is in use here (VS Code forwards ports it sees, and it may be one)."
+  echo "Using $PORT instead."
+fi
+
+BRIDGE_LOG="${TMPDIR:-/tmp}/tf-comfyui-bridge-$$.log"
 bridge_pid=""
 cleanup() {
   trap - TERM EXIT
   echo
   echo "Shutting down: cancelling the Slurm job and closing the bridge."
-  [[ -n "$bridge_pid" ]] && kill "$bridge_pid" 2>/dev/null || true
+  # By process group, not PID: ncat's per-connection forks each hold the
+  # listening socket, so killing the leader alone leaves the port bound.
+  [[ -n "$bridge_pid" ]] && kill -- -"$bridge_pid" 2>/dev/null || true
   # Belt and braces: srun releases the allocation itself on Ctrl-C, so by here
   # the job is normally already gone. This catches the case where srun was
   # killed outright and the job outlived it. By our unique job name, never by
   # a pattern -- a pattern that matches this script's own command line would
   # take out the shell running it.
   scancel --name="$JOB_NAME" --quiet 2>/dev/null || true
+  # A bridge that never bound leaves the printed URL dead with no other sign.
+  if [[ -s "$BRIDGE_LOG" ]] && grep -qi "QUITTING\|Address already in use" "$BRIDGE_LOG"; then
+    echo "NOTE: the port bridge failed, so http://localhost:${PORT} was never live:"
+    sed 's/^/      /' "$BRIDGE_LOG"
+  fi
+  rm -f "$BRIDGE_LOG"
 
   # Slurm can take a few seconds to tear the allocation down, so a job still
   # listed right now is normal rather than a fault. Only say something is wrong
@@ -63,8 +113,8 @@ cleanup() {
 trap cleanup TERM EXIT
 
 # --- bridge: this node's localhost:PORT -> the compute node, once it is up ----
-(
-  node=""
+run_bridge() {
+  local node=""
   for _ in $(seq 1 900); do
     # `|| true` is not decoration: an empty squeue exits 0, but a squeue that
     # cannot reach slurmctld exits non-zero, and under `set -e` a failing
@@ -74,12 +124,20 @@ trap cleanup TERM EXIT
     [[ -n "$node" ]] && break
     sleep 2
   done
-  [[ -z "$node" ]] && exit 0
-  echo ">>> job running on ${node}; bridging http://localhost:${PORT} to it." >&2
+  [[ -z "$node" ]] && return 0
+  echo "bridging localhost:${PORT} -> ${node}:${PORT}"
   # --keep-open so the browser's many parallel connections (and the websocket
   # ComfyUI keeps open for progress) all get through, not just the first.
   exec ncat --listen 127.0.0.1 "$PORT" --keep-open --sh-exec "ncat ${node} ${PORT}"
-) &
+}
+export -f run_bridge
+export JOB_NAME PORT
+
+# setsid: its own process group, so cleanup can kill ncat's per-connection forks
+# as a group. Output goes to a file rather than the terminal -- srun --pty puts
+# the terminal in raw mode, and a background writer into it produces the
+# stair-stepped, half-overwritten lines this used to print.
+setsid bash -c run_bridge >"$BRIDGE_LOG" 2>&1 &
 bridge_pid=$!
 
 cat <<EOF
@@ -104,6 +162,7 @@ cat <<EOF
        TF Load Pipeline takes 1-2 minutes to warm up; after that it is instant.
 
   Press Ctrl-C here at any time to cancel the job and free the GPU.
+  (bridge log: ${BRIDGE_LOG})
   ────────────────────────────────────────────────────────────────────────
 
 EOF

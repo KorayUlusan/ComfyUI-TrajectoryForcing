@@ -28,7 +28,7 @@ someone using it for a real edit, which is the next thing.
 
 Verification, all reproducible from this repo:
 
-- `pytest tests` — 158 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
+- `pytest tests` — 213 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
   every node's schema and `execute` against a stub pipeline.
 - `slurm/gpu_smoke.sbatch` — the nodes against the real TF-L model. **7/7,
   job 449604 on mlcbm011**, including the control (same class + seed reproduces
@@ -245,8 +245,20 @@ The socket stays optional, because a trajectory restored by TF Load Levels has
 no pipeline to carry.
 
 Also from the same pass: coordinates now readable rather than countable (row and
-column numbers on every grid preview), `TF Tokens From Coords` works without a
-`levels` wire, and `TF Levels Info` reports the class *name*.
+column numbers on every grid preview), `TF Tokens From Coords` and `TF Tokens
+From Mask` work without a `levels` wire, and `TF Levels Info` reports the class
+*name*.
+
+The last of those small items needed a second attempt. `TF Decode Levels` and
+`TF Latent Preview` each carry a `level` widget that does nothing unless `which`
+is `single level`, and the first fix was to reword the tooltip -- which changes
+nothing, because nobody reads a tooltip before turning a knob. ComfyUI's V3
+schema has no conditional widget visibility (only a static `hidden` flag), so
+the widget cannot be greyed out. What works is for the node to say it is
+ignoring you, in its own body, at the moment it happens -- the same
+`ui.PreviewText` route the painting notice uses, with
+`has_intermediate_output=True` so it survives the cached re-run. It stays quiet
+when the widget is still at its default, since that is not a change anyone made.
 
 **New: `TF Compare Levels`.** Two trajectories in, tokens-changed per level and
 a heatmap of where out. The question every edit prompts is "did that do
@@ -258,6 +270,67 @@ visible as a number.
 Not done, and still the biggest gap: **a sweep node**. Running the same edit
 across seeds or across l* is the thing a graph should make cheap and the Gradio
 app cannot, and it still means duplicating the graph by hand.
+
+## Third browser session (2026-09-03)
+
+Three reports, all about workflow 03, all traced to the frontend rather than
+guessed at by reading the ComfyUI source map.
+
+**The Painter needs "Node 2.0".** Its widget is registered as
+`PAINTER: transformWidgetConstructorV2ToV1(usePainterWidget())` and only exists
+under Vue node rendering; the classic renderer shows the string `node2only`
+("Node 2.0 only") instead of a brush. The setting is `Comfy.VueNodes.Enabled`
+and -- usefully -- it is stored server-side in
+`user/*/comfy.settings.json`, so `TF Level Canvas` reads it and says exactly
+where to click, but only for the users who have it off. Documented in the
+workflow note, `workflows/README.md` and the README troubleshooting list.
+
+**The Painter showed no image to paint over,** which is the difference between
+painting and painting blind. `usePainter.ts` resolves its backdrop with
+`nodeOutputStore.getNodeImageUrls(node.getInputNode(0))` -- the *stored preview*
+of whatever feeds its image slot, not the tensor on the wire. `TF Level Canvas`
+returned an image but published no preview, so there was nothing to find. It now
+returns `ui.PreviewImage` with `has_intermediate_output=True`. A consequence
+worth knowing: the Painter's image input must stay socket 0, which
+`tests/test_workflows.py` now pins.
+
+**Nodes overflowed their groups once the graph had run.** A `PreviewImage` is
+~66px tall while empty and ~430px with an image, and the generator sized every
+node for its empty state -- so groups were 22px of slack around content that
+grew by 400, and in workflow 02 the previews landed on top of each other. Fixed
+at the source rather than by nudging coordinates: nodes that display something
+carry a realistic `BODY_HEIGHT`, columns are stacked so nodes cannot overlap
+(row numbers became an ordering hint rather than a literal position), a group
+transition reserves room for both borders and the title bar, and group boxes are
+resolved iteratively afterwards -- a group spanning two columns extends as far
+as its lowest member in *either*, so two groups can interleave while no two
+nodes do. `tests/test_workflows.py` checks all of it, plus that no link dangles
+and no virtual note reaches the API payload.
+
+## The bridge leaked its own port (2026-09-03)
+
+Reported as `Ncat: bind to 127.0.0.1:8188: Address already in use` on launch,
+with the log stair-stepped and half-overwritten. Suspected VS Code's port
+forwarding; it was neither VS Code nor the port. Thirty-four orphaned `ncat`
+processes were still bound to 8188, all forwarding to `mlcbm009`, a node whose
+job had ended long before.
+
+`ncat --keep-open` forks a child per connection and **each fork inherits the
+listening socket**, so `kill $bridge_pid` killed the leader and left every fork
+holding the port. Reproduced deliberately: with five connections open, killing
+the leader leaves five processes and the port bound; killing the process group
+leaves none and releases it. The bridge now runs under `setsid` -- its own
+process group -- and cleanup kills the group.
+
+Three things came with it. `serve.sh` sweeps stale bridges of its own at
+startup, identified by the compute node in their command line having no running
+job of ours, so an existing mess clears itself rather than needing a manual
+`pkill`. If the port is genuinely taken by something else it steps to the next
+free one and says so, rather than dying inside a log nobody is reading. And the
+bridge now writes to a file instead of the terminal: `srun --pty` puts the
+terminal in raw mode, and a background writer into it is what produced the
+stair-stepped output -- the garbling and the bind error were the same bug seen
+from two angles.
 
 ## Next
 

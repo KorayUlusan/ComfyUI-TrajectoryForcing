@@ -13,7 +13,7 @@ import numpy as np
 from comfy_api.latest import io
 
 from .data import LevelStack
-from .sockets import CATEGORY, TFLevelsSocket
+from .sockets import CATEGORY_IO, TFLevelsSocket, node_preview
 
 SUBDIR = "trajectory_forcing"
 
@@ -38,8 +38,10 @@ class TFSaveLevels(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFSaveLevels",
+            search_aliases=["save", "export", "npz", "store", "keep"],
+            has_intermediate_output=True,
             display_name="TF Save Levels",
-            category=CATEGORY,
+            category=CATEGORY_IO,
             description=f"Write a trajectory to output/{SUBDIR}/<name>.npz, "
                         "with its class, seed and edit history.",
             is_output_node=True,
@@ -47,7 +49,7 @@ class TFSaveLevels(io.ComfyNode):
                 TFLevelsSocket.Input("levels"),
                 io.String.Input("name", default="trajectory"),
                 io.Boolean.Input(
-                    "overwrite", default=False,
+                    "overwrite", default=False, advanced=True,
                     tooltip="Off appends -001, -002, ... rather than replacing an existing file.",
                 ),
             ],
@@ -71,7 +73,7 @@ class TFSaveLevels(io.ComfyNode):
             history=np.array(levels.history, dtype=object),
             dirty_level=np.int32(-1 if levels.dirty_level is None else levels.dirty_level),
         )
-        return io.NodeOutput(str(path))
+        return io.NodeOutput(str(path), ui=node_preview(text=f"wrote {path}"))
 
 
 class TFLoadLevels(io.ComfyNode):
@@ -79,8 +81,10 @@ class TFLoadLevels(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFLoadLevels",
+            search_aliases=["load", "import", "npz", "restore", "reopen"],
+            has_intermediate_output=True,
             display_name="TF Load Levels",
-            category=CATEGORY,
+            category=CATEGORY_IO,
             description=f"Read back a trajectory saved by TF Save Levels from output/{SUBDIR}/.",
             inputs=[
                 io.Combo.Input("file", options=list_saved() or ["<none saved yet>"]),
@@ -106,4 +110,5 @@ class TFLoadLevels(io.ComfyNode):
                 history=tuple(str(h) for h in data["history"].tolist()) + (f"loaded from {path.name}",),
                 dirty_level=None if dirty < 0 else dirty,
             )
-        return io.NodeOutput(levels, levels.describe())
+        return io.NodeOutput(levels, levels.describe(),
+                             ui=node_preview(text=levels.describe()))

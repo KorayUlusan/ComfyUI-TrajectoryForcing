@@ -12,10 +12,16 @@ result that does not look like that is the interesting kind of wrong.
 from __future__ import annotations
 
 import numpy as np
-from comfy_api.latest import io, ui
+from comfy_api.latest import io
 
 from . import render
-from .sockets import CATEGORY, TFLevelsSocket, pipeline_input, resolve_pipeline
+from .sockets import (
+    CATEGORY_EDIT,
+    TFLevelsSocket,
+    node_preview,
+    pipeline_input,
+    resolve_pipeline,
+)
 
 # Per-token change is scale-free: cosine distance between the two feature
 # vectors, which is the same measure TF Region Map clusters with, so "changed"
@@ -63,8 +69,9 @@ class TFCompareLevels(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TFCompareLevels",
+            search_aliases=["compare", "diff", "difference", "changed", "measure"],
             display_name="TF Compare Levels",
-            category=CATEGORY,
+            category=CATEGORY_EDIT,
             has_intermediate_output=True,
             description=(
                 "Measure what changed between two trajectories, per level and per token.\n\n"
@@ -76,7 +83,7 @@ class TFCompareLevels(io.ComfyNode):
             inputs=[
                 TFLevelsSocket.Input("before", tooltip="Usually the trajectory straight from TF Generate."),
                 TFLevelsSocket.Input("after", tooltip="Usually the output of TF Resume From Level."),
-                io.Int.Input("size", default=512, min=128, max=2048, step=64),
+                io.Int.Input("size", default=512, min=128, max=2048, step=64, advanced=True),
                 io.Boolean.Input(
                     "decode_difference", default=False,
                     tooltip="Also decode both final levels and show the pixel difference. "
@@ -147,7 +154,8 @@ class TFCompareLevels(io.ComfyNode):
             )]
 
         report = "\n".join(lines)
+        heatmap = render.to_image(images)
         return io.NodeOutput(
-            report, render.to_image(images), total, round(peak, 6),
-            ui=ui.PreviewText(report),
+            report, heatmap, total, round(peak, 6),
+            ui=node_preview(image=heatmap, text=report),
         )
