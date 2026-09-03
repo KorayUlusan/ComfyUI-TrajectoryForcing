@@ -140,16 +140,32 @@ def snap_to_regions(selection: TokenSelection, regions: RegionMap, min_overlap: 
     return TokenSelection(
         mask=out,
         note=f"snapped to regions {kept}" if kept else "snapped to regions (none cleared the overlap)",
+        level=regions.level,
     )
+
+
+def _combined_level(a: TokenSelection, b: TokenSelection) -> int | None:
+    """The level a combination belongs to, or an error if the inputs disagree.
+
+    Combining a selection snapped to level 1's regions with one snapped to
+    level 2's produces something that describes neither.
+    """
+    if a.level is not None and b.level is not None and a.level != b.level:
+        raise ValueError(
+            f"Cannot combine a selection from level {a.level}'s regions with one from "
+            f"level {b.level}'s -- point both region maps at the same level."
+        )
+    return a.level if a.level is not None else b.level
 
 
 def combine(a: TokenSelection, b: TokenSelection | None, op: str) -> TokenSelection:
     if op == "invert":
-        return TokenSelection(mask=~a.mask, note=f"invert({a.note})")
+        return TokenSelection(mask=~a.mask, note=f"invert({a.note})", level=a.level)
     if b is None:
         raise ValueError(f"Operation {op!r} needs a second selection.")
     if a.mask.shape != b.mask.shape:
         raise ValueError(f"Cannot combine {a.mask.shape} with {b.mask.shape}.")
+    level = _combined_level(a, b)
     if op == "union":
         mask = a.mask | b.mask
     elif op == "intersection":
@@ -160,7 +176,7 @@ def combine(a: TokenSelection, b: TokenSelection | None, op: str) -> TokenSelect
         mask = a.mask ^ b.mask
     else:
         raise ValueError(f"Unknown combine op {op!r}.")
-    return TokenSelection(mask=mask, note=f"{op}({a.note}, {b.note})")
+    return TokenSelection(mask=mask, note=f"{op}({a.note}, {b.note})", level=level)
 
 
 # ---------------------------------------------------------------------------

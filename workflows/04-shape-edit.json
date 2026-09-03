@@ -1,11 +1,35 @@
 {
   "id": "trajectory-forcing-04-shape-edit",
   "revision": 0,
-  "last_node_id": 10,
-  "last_link_id": 14,
+  "last_node_id": 11,
+  "last_link_id": 13,
   "nodes": [
     {
       "id": 1,
+      "type": "MarkdownNote",
+      "pos": [
+        -356,
+        80
+      ],
+      "size": [
+        400,
+        520
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "# 4. Change a region's shape, not its content\n\n**Press Run \u2014 this one works as-is.**\n\nThe other edits change *what* a region looks like. This one changes *where it\nends*. Tokens are handed from one region to a neighbour: they take on the\nreceiving region's average feature, so the boundary moves and nothing new is\ninvented.\n\nTwo selections, both on the 16\u00d716 token grid:\n\n- **tokens to hand over** \u2014 the ones that change sides.\n- **one token in the receiving region** \u2014 anywhere inside the region that is\n  taking them. The whole region it names supplies the feature.\n\nThey must name **different** regions, or the node stops and says so.\n\n**Look at the region map preview first** to see where the boundaries actually\nare, then pick coordinates on either side of one.\n"
+      ],
+      "color": "#432",
+      "bgcolor": "#653",
+      "title": "README \u2014 read me first"
+    },
+    {
+      "id": 2,
       "type": "TFLoadPipeline",
       "pos": [
         80,
@@ -16,7 +40,7 @@
         118
       ],
       "flags": {},
-      "order": 0,
+      "order": 1,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -26,9 +50,7 @@
           "type": "TF_PIPELINE",
           "slot_index": 0,
           "links": [
-            1,
-            9,
-            11
+            1
           ]
         },
         {
@@ -49,7 +71,7 @@
       ]
     },
     {
-      "id": 2,
+      "id": 3,
       "type": "TFGenerate",
       "pos": [
         460,
@@ -60,7 +82,7 @@
         144
       ],
       "flags": {},
-      "order": 1,
+      "order": 2,
       "mode": 0,
       "inputs": [
         {
@@ -78,9 +100,9 @@
           "slot_index": 0,
           "links": [
             2,
-            3,
             4,
-            5
+            5,
+            6
           ]
         }
       ],
@@ -94,7 +116,7 @@
       ]
     },
     {
-      "id": 3,
+      "id": 4,
       "type": "TFRegionMap",
       "pos": [
         840,
@@ -105,7 +127,7 @@
         144
       ],
       "flags": {},
-      "order": 2,
+      "order": 3,
       "mode": 0,
       "inputs": [
         {
@@ -122,7 +144,7 @@
           "type": "TF_REGIONS",
           "slot_index": 0,
           "links": [
-            6
+            8
           ]
         },
         {
@@ -131,7 +153,7 @@
           "type": "IMAGE",
           "slot_index": 1,
           "links": [
-            13
+            3
           ]
         },
         {
@@ -140,6 +162,15 @@
           "type": "INT",
           "slot_index": 2,
           "links": []
+        },
+        {
+          "label": "level",
+          "name": "level",
+          "type": "INT",
+          "slot_index": 3,
+          "links": [
+            7
+          ]
         }
       ],
       "properties": {
@@ -152,25 +183,62 @@
       ]
     },
     {
-      "id": 4,
-      "type": "TFTokensFromCoords",
+      "id": 5,
+      "type": "PreviewImage",
       "pos": [
         840,
         440
       ],
       "size": [
         320,
+        66
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "the regions \u2014 pick coordinates from this"
+    },
+    {
+      "id": 6,
+      "type": "TFTokensFromCoords",
+      "pos": [
+        1220,
+        80
+      ],
+      "size": [
+        320,
         118
       ],
       "flags": {},
-      "order": 3,
+      "order": 5,
       "mode": 0,
       "inputs": [
         {
           "label": "levels",
           "name": "levels",
           "type": "TF_LEVELS",
-          "link": 3
+          "link": 4
         },
         {
           "label": "regions",
@@ -186,7 +254,7 @@
           "type": "TF_TOKENS",
           "slot_index": 0,
           "links": [
-            7
+            9
           ]
         },
         {
@@ -213,25 +281,25 @@
       "title": "tokens to hand over"
     },
     {
-      "id": 5,
+      "id": 7,
       "type": "TFTokensFromCoords",
       "pos": [
-        840,
-        680
+        1220,
+        380
       ],
       "size": [
         320,
         118
       ],
       "flags": {},
-      "order": 4,
+      "order": 6,
       "mode": 0,
       "inputs": [
         {
           "label": "levels",
           "name": "levels",
           "type": "TF_LEVELS",
-          "link": 4
+          "link": 5
         },
         {
           "label": "regions",
@@ -247,7 +315,7 @@
           "type": "TF_TOKENS",
           "slot_index": 0,
           "links": [
-            8
+            10
           ]
         },
         {
@@ -274,43 +342,52 @@
       "title": "one token in the receiving region"
     },
     {
-      "id": 6,
+      "id": 8,
       "type": "TFShapeEdit",
       "pos": [
-        1220,
+        1600,
         80
       ],
       "size": [
         320,
-        196
+        222
       ],
       "flags": {},
-      "order": 5,
+      "order": 7,
       "mode": 0,
       "inputs": [
         {
           "label": "levels",
           "name": "levels",
           "type": "TF_LEVELS",
-          "link": 5
+          "link": 6
+        },
+        {
+          "label": "level",
+          "name": "level",
+          "type": "INT",
+          "link": 7,
+          "widget": {
+            "name": "level"
+          }
         },
         {
           "label": "regions",
           "name": "regions",
           "type": "TF_REGIONS",
-          "link": 6
+          "link": 8
         },
         {
           "label": "boundary_tokens",
           "name": "boundary_tokens",
           "type": "TF_TOKENS",
-          "link": 7
+          "link": 9
         },
         {
           "label": "receiving_tokens",
           "name": "receiving_tokens",
           "type": "TF_TOKENS",
-          "link": 8
+          "link": 10
         }
       ],
       "outputs": [
@@ -320,7 +397,7 @@
           "type": "TF_LEVELS",
           "slot_index": 0,
           "links": [
-            10
+            11
           ]
         },
         {
@@ -340,10 +417,10 @@
       ]
     },
     {
-      "id": 7,
+      "id": 9,
       "type": "TFResumeFromLevel",
       "pos": [
-        1600,
+        1980,
         80
       ],
       "size": [
@@ -351,20 +428,20 @@
         222
       ],
       "flags": {},
-      "order": 6,
+      "order": 8,
       "mode": 0,
       "inputs": [
-        {
-          "label": "pipeline",
-          "name": "pipeline",
-          "type": "TF_PIPELINE",
-          "link": 9
-        },
         {
           "label": "levels",
           "name": "levels",
           "type": "TF_LEVELS",
-          "link": 10
+          "link": 11
+        },
+        {
+          "label": "pipeline",
+          "name": "pipeline",
+          "type": "TF_PIPELINE",
+          "link": null
         }
       ],
       "outputs": [
@@ -397,10 +474,10 @@
       ]
     },
     {
-      "id": 8,
+      "id": 10,
       "type": "TFDecode",
       "pos": [
-        1980,
+        2360,
         80
       ],
       "size": [
@@ -408,20 +485,20 @@
         170
       ],
       "flags": {},
-      "order": 7,
+      "order": 9,
       "mode": 0,
       "inputs": [
-        {
-          "label": "pipeline",
-          "name": "pipeline",
-          "type": "TF_PIPELINE",
-          "link": 11
-        },
         {
           "label": "levels",
           "name": "levels",
           "type": "TF_LEVELS",
           "link": 12
+        },
+        {
+          "label": "pipeline",
+          "name": "pipeline",
+          "type": "TF_PIPELINE",
+          "link": null
         }
       ],
       "outputs": [
@@ -431,7 +508,7 @@
           "type": "IMAGE",
           "slot_index": 0,
           "links": [
-            14
+            13
           ]
         },
         {
@@ -452,18 +529,18 @@
       ]
     },
     {
-      "id": 9,
+      "id": 11,
       "type": "PreviewImage",
       "pos": [
-        1220,
-        560
+        2740,
+        80
       ],
       "size": [
         320,
         66
       ],
       "flags": {},
-      "order": 8,
+      "order": 10,
       "mode": 0,
       "inputs": [
         {
@@ -486,161 +563,169 @@
         "Node name for S&R": "PreviewImage"
       },
       "widgets_values": [],
-      "title": "regions"
-    },
-    {
-      "id": 10,
-      "type": "PreviewImage",
-      "pos": [
-        2360,
-        80
-      ],
-      "size": [
-        320,
-        66
-      ],
-      "flags": {},
-      "order": 9,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "images",
-          "name": "images",
-          "type": "IMAGE",
-          "link": 14
-        }
-      ],
-      "outputs": [
-        {
-          "label": "images",
-          "name": "images",
-          "type": "IMAGE",
-          "slot_index": 0,
-          "links": []
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "PreviewImage"
-      },
-      "widgets_values": [],
       "title": "after the shape edit"
     }
   ],
   "links": [
     [
       1,
-      1,
-      0,
       2,
+      0,
+      3,
       0,
       "TF_PIPELINE"
     ],
     [
       2,
-      2,
-      0,
       3,
-      0,
-      "TF_LEVELS"
-    ],
-    [
-      3,
-      2,
       0,
       4,
       0,
       "TF_LEVELS"
     ],
     [
-      4,
-      2,
-      0,
-      5,
-      0,
-      "TF_LEVELS"
-    ],
-    [
-      5,
-      2,
-      0,
-      6,
-      0,
-      "TF_LEVELS"
-    ],
-    [
-      6,
       3,
-      0,
-      6,
+      4,
       1,
+      5,
+      0,
+      "IMAGE"
+    ],
+    [
+      4,
+      3,
+      0,
+      6,
+      0,
+      "TF_LEVELS"
+    ],
+    [
+      5,
+      3,
+      0,
+      7,
+      0,
+      "TF_LEVELS"
+    ],
+    [
+      6,
+      3,
+      0,
+      8,
+      0,
+      "TF_LEVELS"
+    ],
+    [
+      7,
+      4,
+      3,
+      8,
+      1,
+      "INT"
+    ],
+    [
+      8,
+      4,
+      0,
+      8,
+      2,
       "TF_REGIONS"
     ],
     [
-      7,
-      4,
-      0,
+      9,
       6,
-      2,
-      "TF_TOKENS"
-    ],
-    [
+      0,
       8,
-      5,
-      0,
-      6,
       3,
       "TF_TOKENS"
     ],
     [
-      9,
-      1,
-      0,
-      7,
-      0,
-      "TF_PIPELINE"
-    ],
-    [
       10,
-      6,
-      0,
       7,
-      1,
-      "TF_LEVELS"
+      0,
+      8,
+      4,
+      "TF_TOKENS"
     ],
     [
       11,
-      1,
-      0,
       8,
       0,
-      "TF_PIPELINE"
+      9,
+      0,
+      "TF_LEVELS"
     ],
     [
       12,
-      7,
+      9,
       0,
-      8,
-      1,
+      10,
+      0,
       "TF_LEVELS"
     ],
     [
       13,
-      3,
-      1,
-      9,
-      0,
-      "IMAGE"
-    ],
-    [
-      14,
-      8,
-      0,
       10,
+      0,
+      11,
       0,
       "IMAGE"
     ]
   ],
-  "groups": [],
+  "groups": [
+    {
+      "id": 1,
+      "title": "1 \u00b7 Load and generate",
+      "bounding": [
+        58,
+        16,
+        744,
+        230
+      ],
+      "color": "#3f789e",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "2 \u00b7 Find a boundary, name both sides",
+      "bounding": [
+        818,
+        16,
+        744,
+        512
+      ],
+      "color": "#b58b2a",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 3,
+      "title": "3 \u00b7 Move the boundary, then re-sample",
+      "bounding": [
+        1578,
+        16,
+        744,
+        308
+      ],
+      "color": "#a1309b",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 4,
+      "title": "4 \u00b7 Result",
+      "bounding": [
+        2338,
+        16,
+        744,
+        256
+      ],
+      "color": "#8A8",
+      "font_size": 24,
+      "flags": {}
+    }
+  ],
   "config": {},
   "extra": {
     "description": "Move a boundary instead of a feature: hand tokens from one region to a neighbour, so the region's extent changes and its feature content does not."

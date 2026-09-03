@@ -10,17 +10,23 @@ is the one-click "grab the whole cluster" of the editing env's region select.
 from __future__ import annotations
 
 import numpy as np
-from comfy_api.latest import io
+from comfy_api.latest import io, ui
+from comfy_execution.graph_utils import ExecutionBlocker
 
 from . import render, tokens
 from .sockets import (
     CATEGORY,
     TFLevelsSocket,
-    TFPipelineSocket,
     TFRegionsSocket,
     TFTokensSocket,
     level_input,
+    pipeline_input,
+    resolve_pipeline,
 )
+
+# Coordinates are typed by hand against these pictures, so they carry row/column
+# labels unless something downstream is going to consume them as a plain image.
+DEFAULT_GRID = (16, 16)
 
 
 class TFLevelCanvas(io.ComfyNode):
@@ -36,7 +42,6 @@ class TFLevelCanvas(io.ComfyNode):
                 "the mask that comes back lines up with the token grid."
             ),
             inputs=[
-                TFPipelineSocket.Input("pipeline"),
                 TFLevelsSocket.Input("levels"),
                 level_input(),
                 io.Combo.Input(
@@ -45,6 +50,11 @@ class TFLevelCanvas(io.ComfyNode):
                             "that structure looks like as an image.",
                 ),
                 io.Boolean.Input("draw_grid", default=True),
+                io.Boolean.Input(
+                    "label_coords", default=True,
+                    tooltip="Number the rows and columns, so a coordinate for TF Tokens From "
+                            "Coords can be read off instead of counted.",
+                ),
                 io.Int.Input(
                     "size", default=512, min=128, max=2048, step=64,
                     tooltip="Rounded so each token is a whole number of pixels.",
@@ -58,13 +68,15 @@ class TFLevelCanvas(io.ComfyNode):
                     "highlight", optional=True,
                     tooltip="Tint an existing selection, to check what a mask resolved to.",
                 ),
+                pipeline_input(),
             ],
             outputs=[io.Image.Output("canvas"), io.Int.Output("level")],
         )
 
     @classmethod
-    def execute(cls, pipeline, levels, level, view, draw_grid, size,
-                regions=None, highlight=None) -> io.NodeOutput:
+    def execute(cls, levels, level, view, draw_grid, label_coords, size,
+                regions=None, highlight=None, pipeline=None) -> io.NodeOutput:
+        pipeline = resolve_pipeline(pipeline, levels, "TF Level Canvas")
         index = levels.clamp(level)
         if view == "decoded RGB":
             single = levels.latents[index:index + 1]
@@ -82,6 +94,8 @@ class TFLevelCanvas(io.ComfyNode):
         if highlight is not None:
             highlight.check_grid(levels.grid, "highlight")
             canvas = render.draw_selection(canvas, highlight)
+        if label_coords:
+            canvas = render.draw_ticks(canvas, levels.grid)
         return io.NodeOutput(render.to_image(canvas), index)
 
 
@@ -111,6 +125,11 @@ class TFRegionMap(io.ComfyNode):
                 TFRegionsSocket.Output("regions"),
                 io.Image.Output("map"),
                 io.Int.Output("num_regions"),
+                io.Int.Output(
+                    "level",
+                    tooltip="The level these regions describe. Wire it into the edit node's "
+                            "'level' so the two cannot drift apart.",
+                ),
             ],
         )
 
@@ -119,7 +138,8 @@ class TFRegionMap(io.ComfyNode):
         index = levels.clamp(level)
         regions = tokens.build_region_map(levels.level(index), index, cosine_threshold)
         picture = render.draw_grid(render.render_regions(regions, size), regions.ids.shape)
-        return io.NodeOutput(regions, render.to_image(picture), regions.num_regions)
+        picture = render.draw_ticks(picture, regions.ids.shape)
+        return io.NodeOutput(regions, render.to_image(picture), regions.num_regions, index)
 
 
 class TFTokensFromMask(io.ComfyNode):
@@ -129,14 +149,23 @@ class TFTokensFromMask(io.ComfyNode):
             node_id="TFTokensFromMask",
             display_name="TF Tokens From Mask",
             category=CATEGORY,
+            # Keeps this node's own text visible on a re-run and across a page
+            # refresh. Without it the "nothing painted yet" notice shows once
+            # and is gone the next time, when the node is served from cache.
+            has_intermediate_output=True,
             description=(
                 "Reduce a painted mask to a token selection. A token counts as selected once "
                 "enough of its footprint is painted, so a stroke that clips a corner does not "
-                "silently overwrite that token's whole feature vector."
+                "silently overwrite that token's whole feature vector.\n\n"
+                "With nothing painted yet it stops the graph here rather than failing downstream: "
+                "the first run of a painting workflow exists to produce the canvas."
             ),
             inputs=[
                 io.Mask.Input("mask"),
-                TFLevelsSocket.Input("levels", tooltip="Only its token-grid size is read."),
+                TFLevelsSocket.Input(
+                    "levels", optional=True,
+                    tooltip="Only its token-grid size is read. Unwired assumes 16x16.",
+                ),
                 io.Float.Input(
                     "coverage", default=0.35, min=0.01, max=1.0, step=0.01,
                     tooltip="Fraction of a token's pixels that must be painted for it to count.",
@@ -160,11 +189,35 @@ class TFTokensFromMask(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, mask, levels, coverage, regions=None, region_overlap=0.3) -> io.NodeOutput:
-        selection = tokens.mask_to_tokens(render.from_mask(mask), levels.grid, coverage)
+    def execute(cls, mask, coverage, levels=None, regions=None, region_overlap=0.3) -> io.NodeOutput:
+        grid = levels.grid if levels is not None else (
+            regions.ids.shape if regions is not None else DEFAULT_GRID)
+        painted = render.from_mask(mask)
+        selection = tokens.mask_to_tokens(painted, grid, coverage)
         if regions is not None:
             selection = tokens.snap_to_regions(selection, regions, region_overlap)
-        return io.NodeOutput(selection, selection.count, _describe(selection))
+        if selection.count == 0:
+            # Painting workflows are two-pass by construction -- the first run
+            # renders the canvas you paint on, so at that point there is nothing
+            # to reduce. Stopping the graph here is right; how to stop it took
+            # two wrong turns worth recording.
+            #
+            # Not `block_execution=reason`: a blocker carrying a message is
+            # reported to the browser as "Node threw an error during execution",
+            # and only on the *first* run -- the second finds this node cached,
+            # never calls execute, and blocks in silence. Alarming and
+            # inconsistent, which is worse than either alone.
+            #
+            # Not a bare `return ExecutionBlocker(None)` either: EXECUTE_NORMALIZED
+            # turns that into NodeOutput(block_execution=None), i.e. no block at
+            # all. One blocker per declared output is what actually stops the
+            # graph, quietly and the same way on every run, and it leaves `ui`
+            # free to say why in this node's own body.
+            stop = ExecutionBlocker(None)
+            reason = _nothing_painted(painted, coverage, regions, region_overlap)
+            return io.NodeOutput(stop, stop, stop, ui=ui.PreviewText(reason))
+        info = _describe(selection)
+        return io.NodeOutput(selection, selection.count, info, ui=ui.PreviewText(info))
 
 
 class TFTokensFromCoords(io.ComfyNode):
@@ -183,7 +236,11 @@ class TFTokensFromCoords(io.ComfyNode):
                     "coords", default="", multiline=True,
                     placeholder="7,7  7,8  8,7  8,8      or      7,6:9",
                 ),
-                TFLevelsSocket.Input("levels", tooltip="Only its token-grid size is read."),
+                TFLevelsSocket.Input(
+                    "levels", optional=True,
+                    tooltip="Only its token-grid size is read. Unwired assumes 16x16, which "
+                            "is what every released checkpoint uses.",
+                ),
                 TFRegionsSocket.Input(
                     "regions", optional=True,
                     tooltip="Expand each typed token to the whole region containing it -- the "
@@ -198,8 +255,10 @@ class TFTokensFromCoords(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, coords, levels, regions=None) -> io.NodeOutput:
-        selection = tokens.parse_coords(coords, levels.grid)
+    def execute(cls, coords, levels=None, regions=None) -> io.NodeOutput:
+        grid = levels.grid if levels is not None else (
+            regions.ids.shape if regions is not None else DEFAULT_GRID)
+        selection = tokens.parse_coords(coords, grid)
         if regions is not None:
             # Any overlap at all expands the region: a typed coordinate is a
             # deliberate pick of one token, not a rough stroke to be thresholded.
@@ -255,8 +314,33 @@ class TFTokensPreview(io.ComfyNode):
         blank = np.full((grid[0], grid[1], 3), 24, dtype=np.uint8)
         canvas = render.fit_to_grid(blank, grid, size)
         canvas = render.draw_grid(render.draw_selection(canvas, selection), grid)
+        canvas = render.draw_ticks(canvas, grid)
         coords = " ".join(f"{r},{c}" for r, c in selection.coords)
         return io.NodeOutput(render.to_image(canvas), coords)
+
+
+def _nothing_painted(painted: np.ndarray, coverage: float, regions, region_overlap: float) -> str:
+    """Why the selection came out empty, and what to do about it.
+
+    The three causes need different fixes, and guessing wrong wastes a run:
+    nothing painted at all, painted too thinly for the coverage threshold, or
+    painted across regions none of which cleared the overlap threshold.
+    """
+    if not painted.any():
+        return (
+            "Nothing painted yet. Paint over the region you want on the Painter node, then run "
+            "again. (The first run of this workflow exists to produce the canvas to paint on.)"
+        )
+    if regions is not None:
+        return (
+            f"Painted, but no region reached the {region_overlap:.2f} overlap threshold. Paint "
+            "more of one region -- TF Region Map's preview shows where the boundaries are -- or "
+            "lower 'region_overlap'."
+        )
+    return (
+        f"Painted, but no token reached {coverage:.2f} coverage. Use a bigger brush, or lower "
+        "'coverage'."
+    )
 
 
 def _describe(selection) -> str:

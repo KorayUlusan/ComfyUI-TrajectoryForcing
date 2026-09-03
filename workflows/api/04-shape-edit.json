@@ -1,5 +1,5 @@
 {
-  "1": {
+  "2": {
     "class_type": "TFLoadPipeline",
     "inputs": {
       "checkpoint": "auto (download TF_L_edit)",
@@ -10,11 +10,11 @@
       "title": "TF Load Pipeline"
     }
   },
-  "2": {
+  "3": {
     "class_type": "TFGenerate",
     "inputs": {
       "pipeline": [
-        "1",
+        "2",
         0
       ],
       "class_id": 213,
@@ -24,11 +24,11 @@
       "title": "TF Generate"
     }
   },
-  "3": {
+  "4": {
     "class_type": "TFRegionMap",
     "inputs": {
       "levels": [
-        "2",
+        "3",
         0
       ],
       "level": 2,
@@ -39,12 +39,24 @@
       "title": "TF Region Map"
     }
   },
-  "4": {
+  "5": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "4",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "the regions \u2014 pick coordinates from this"
+    }
+  },
+  "6": {
     "class_type": "TFTokensFromCoords",
     "inputs": {
       "coords": "7,7 8,7",
       "levels": [
-        "2",
+        "3",
         0
       ]
     },
@@ -52,12 +64,12 @@
       "title": "tokens to hand over"
     }
   },
-  "5": {
+  "7": {
     "class_type": "TFTokensFromCoords",
     "inputs": {
       "coords": "0,0",
       "levels": [
-        "2",
+        "3",
         0
       ]
     },
@@ -65,24 +77,27 @@
       "title": "one token in the receiving region"
     }
   },
-  "6": {
+  "8": {
     "class_type": "TFShapeEdit",
     "inputs": {
       "levels": [
-        "2",
-        0
-      ],
-      "level": 2,
-      "regions": [
         "3",
         0
       ],
-      "boundary_tokens": [
+      "level": [
+        "4",
+        3
+      ],
+      "regions": [
         "4",
         0
       ],
+      "boundary_tokens": [
+        "6",
+        0
+      ],
       "receiving_tokens": [
-        "5",
+        "7",
         0
       ],
       "strength": 1.0
@@ -91,15 +106,11 @@
       "title": "TF Shape Edit"
     }
   },
-  "7": {
+  "9": {
     "class_type": "TFResumeFromLevel",
     "inputs": {
-      "pipeline": [
-        "1",
-        0
-      ],
       "levels": [
-        "6",
+        "8",
         0
       ],
       "level": 2,
@@ -111,15 +122,11 @@
       "title": "TF Resume From Level"
     }
   },
-  "8": {
+  "10": {
     "class_type": "TFDecode",
     "inputs": {
-      "pipeline": [
-        "1",
-        0
-      ],
       "levels": [
-        "7",
+        "9",
         0
       ],
       "which": "all levels",
@@ -130,23 +137,11 @@
       "title": "TF Decode Levels"
     }
   },
-  "9": {
+  "11": {
     "class_type": "PreviewImage",
     "inputs": {
       "images": [
-        "3",
-        1
-      ]
-    },
-    "_meta": {
-      "title": "regions"
-    }
-  },
-  "10": {
-    "class_type": "PreviewImage",
-    "inputs": {
-      "images": [
-        "8",
+        "10",
         0
       ]
     },

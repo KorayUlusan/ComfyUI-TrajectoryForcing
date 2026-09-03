@@ -12,7 +12,15 @@ from . import render
 from .data import LevelStack
 from .locate import AUTO_CHECKPOINT, imagenet_classes, list_checkpoints, tf_configs
 from .pipeline import load_pipeline
-from .sockets import CATEGORY, TFLevelsSocket, TFPipelineSocket, level_input, seed_input
+from .sockets import (
+    CATEGORY,
+    TFLevelsSocket,
+    TFPipelineSocket,
+    level_input,
+    pipeline_input,
+    resolve_pipeline,
+    seed_input,
+)
 
 WHICH_LEVELS = ["all levels", "final level only", "single level"]
 
@@ -139,6 +147,7 @@ class TFGenerate(io.ComfyNode):
                 class_id=int(class_id),
                 seed=int(seed),
                 history=(f"generate(class={int(class_id)}, seed={int(seed)})",),
+                pipeline=pipeline,
             )
         )
 
@@ -155,22 +164,23 @@ class TFDecode(io.ComfyNode):
                 "any point in DINOv2 space, every intermediate level decodes, not only the last."
             ),
             inputs=[
-                TFPipelineSocket.Input("pipeline"),
                 TFLevelsSocket.Input("levels"),
                 which_input(),
                 level_input(
-                    tooltip="Level to decode, used only when 'which' is 'single level'."),
+                    tooltip="Level to decode. IGNORED unless 'which' is 'single level'."),
                 io.Boolean.Input(
                     "label_levels", default=True,
                     tooltip="Write 'Level 2 (subparts)' under each frame, since a batch "
                             "preview shows no captions.",
                 ),
+                pipeline_input(),
             ],
             outputs=[io.Image.Output("images"), io.String.Output("warnings")],
         )
 
     @classmethod
-    def execute(cls, pipeline, levels, which, level, label_levels) -> io.NodeOutput:
+    def execute(cls, levels, which, level, label_levels, pipeline=None) -> io.NodeOutput:
+        pipeline = resolve_pipeline(pipeline, levels, "TF Decode Levels")
         wanted = pick_levels(levels, which, level)
         # decode_last is a real saving on the ViT-XL decoder; anything else goes
         # through decode_all and is subset afterwards.
@@ -205,10 +215,9 @@ class TFLatentPreview(io.ComfyNode):
                 "and it shows the region structure the edit nodes operate on."
             ),
             inputs=[
-                TFPipelineSocket.Input("pipeline"),
                 TFLevelsSocket.Input("levels"),
                 which_input(),
-                level_input(tooltip="Level to render, used only when 'which' is 'single level'."),
+                level_input(tooltip="Level to render. IGNORED unless 'which' is 'single level'."),
                 io.Int.Input(
                     "size", default=512, min=64, max=2048, step=64,
                     tooltip="Approximate output width; rounded so each token is a whole "
@@ -220,12 +229,15 @@ class TFLatentPreview(io.ComfyNode):
                     tooltip="Fit the PCA colours jointly with this trajectory too, so two images "
                             "being compared are coloured on the same axes.",
                 ),
+                pipeline_input(),
             ],
             outputs=[io.Image.Output("images")],
         )
 
     @classmethod
-    def execute(cls, pipeline, levels, which, level, size, label_levels, palette_from=None) -> io.NodeOutput:
+    def execute(cls, levels, which, level, size, label_levels,
+                palette_from=None, pipeline=None) -> io.NodeOutput:
+        pipeline = resolve_pipeline(pipeline, levels, "TF Latent Preview")
         palette = None
         if palette_from is not None:
             palette = pipeline.fit_palette([levels.latents, palette_from.latents])
@@ -253,10 +265,13 @@ class TFLevelsInfo(io.ComfyNode):
                 io.String.Output("info"),
                 io.Int.Output("num_levels"),
                 io.Int.Output("class_id"),
+                io.String.Output("class_name"),
                 io.Int.Output("seed"),
             ],
         )
 
     @classmethod
     def execute(cls, levels) -> io.NodeOutput:
-        return io.NodeOutput(levels.describe(), levels.num_levels, levels.class_id, levels.seed)
+        name = imagenet_classes().get(int(levels.class_id), "")
+        return io.NodeOutput(
+            levels.describe(), levels.num_levels, levels.class_id, name, levels.seed)

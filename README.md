@@ -1,65 +1,133 @@
 # ComfyUI-TrajectoryForcing
 
-A ComfyUI custom-node extension for [Trajectory Forcing](https://mervekocabas.github.io/TrajectoryForcing/)
-(TF, ECCV 2026): coarse-to-fine generation with a decodable preview at every
-level, and the paper's interactive latent-token editing, as a node graph.
+ComfyUI nodes for [Trajectory Forcing](https://mervekocabas.github.io/TrajectoryForcing/)
+(TF, ECCV 2026): coarse-to-fine image generation with a decodable preview at
+every level, and the paper's interactive latent-token editing, as a node graph.
 
-TF generates an image by walking a learned trajectory through a hierarchical
-DINOv2 latent space -- object/background, then parts, then subparts, then the
-finest tokens -- one network evaluation per level. Because the RAE decoder is
-frozen and works on any point in that space, *every* intermediate level decodes
-to a picture, which is what makes the trajectory something a user can inspect,
-edit, and resume from. That structure is a DAG with visible intermediates and a
-feedback edge, which is a better fit for a node graph than for a single page.
+> **First time with ComfyUI?** Start with
+> **[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)** — it assumes nothing and
+> gets you from an empty terminal to your first edit.
 
-**Status: working end to end, not yet used in anger.** Every node runs against
-the real TF-L model on an H100, the example workflows execute through a real
-ComfyUI server, and the tests below pass. What it has not had is a session of
-someone actually trying to make a specific edit and finding out where the
-interaction model gets in the way.
+![four levels of one trajectory](docs/img/trajectory.png)
 
-```
-[TF Load Pipeline] ─┬─► [TF Generate] ──┬─► [TF Decode Levels] ──► [Preview Image]
-                    │                   ├─► [TF Latent Preview] ─► [Preview Image]
-                    │                   │
-                    │                   ├─► [TF Region Map] ──┐
-                    │                   │                     │
-                    │                   └─► [TF Level Canvas] ┴─► [Painter] ─► [TF Tokens From Mask]
-                    │                                                                    │
-                    │                            [TF Feature Edit] / [TF Shape Edit] ◄───┘
-                    │                                    │
-                    └────────────────────► [TF Resume From Level] ──► [TF Decode Levels]
-```
+TF builds an image in four passes through a hierarchical DINOv2 latent space —
+object/background, then parts, then subparts, then the finest tokens — one
+network evaluation each. The RAE decoder is frozen and works on any point in
+that space, so *every* intermediate level decodes to a picture. That is what
+makes the trajectory something you can inspect, edit and resume from, and it is
+a DAG with visible intermediates and a feedback edge — a better fit for a node
+graph than for a single page.
+
+![before and after an edit](docs/img/edit.png)
+
+---
+
+## Requirements
+
+| | |
+|---|---|
+| GPU | NVIDIA, **8 GB VRAM minimum**, 12 GB comfortable. No CPU or Apple Silicon path. |
+| OS | Linux (developed on RHEL 9) or Windows with CUDA |
+| Disk | ~11 GB environment + ~13 GB model weights |
+| Python | 3.11 |
+
+VRAM figures are measured rather than estimated — `scripts/measure_resources.py`
+produces them, and on an H100 the peak for the full editing workflow was
+**6.6 GiB**, with 5.3 GiB of host RAM:
+
+| stage | VRAM |
+|---|---|
+| model loaded | 2.5 GiB |
+| + first generate (compiles XLA) | 4.6 GiB |
+| + RAE decoder built | 6.6 GiB |
+| full edit, two trajectories held | 6.6 GiB |
+
+That is TrajectoryForcing's share only. A workflow that also loads an SD
+checkpoint needs room for both, so on an 8 GB card keep this the only model in
+the graph.
+
+---
 
 ## Install
 
-Needs a GPU. TF runs a JAX flow model and a PyTorch RAE decoder in the same
-process, so one environment has to hold both stacks:
+Both routes need a **TrajectoryForcing checkout** — the model code is imported
+from it rather than vendored, so this extension always tracks the pinned
+upstream rather than a stale copy of its math. Point `TF_REPO` at it, or put it
+next to this directory.
+
+### Option A: your own machine
 
 ```bash
-git clone https://github.com/comfyanonymous/ComfyUI ~/ComfyUI      # if you have none
-ln -s /path/to/ComfyUI-TrajectoryForcing ~/ComfyUI/custom_nodes/
+git clone https://github.com/comfyanonymous/ComfyUI ~/ComfyUI
+git clone https://github.com/mervekocabas/TrajectoryForcing ~/TrajectoryForcing
+git clone <this-repo> ~/ComfyUI-TrajectoryForcing
+ln -s ~/ComfyUI-TrajectoryForcing ~/ComfyUI/custom_nodes/ComfyUI-TrajectoryForcing
 
-bash env/setup.sh          # builds ~/.venvs/comfyui-tf (~10 min, ~11 GB)
-./run_comfyui.sh           # http://localhost:8188
+cd ~/ComfyUI-TrajectoryForcing
+export TF_REPO=~/TrajectoryForcing
+bash env/setup.sh          # ~10 min, ~11 GB
+./run_comfyui.sh           # then open http://localhost:8188
 ```
 
-`env/setup.sh` documents the install order and the one pin that had to move
-(ComfyUI 0.34 needs a newer torch than TrajectoryForcing pins); see
-`requirements.txt` for the reasoning.
+Wait for `To see the GUI go to: http://0.0.0.0:8188` — the port is not open
+before that line appears.
 
-The extension needs a **TrajectoryForcing checkout** to import the model from --
-it is never vendored, so the code here always tracks the pinned submodule rather
-than a stale copy of its math. It is found as a sibling directory, or set
-`TF_REPO`. Weights are resolved on first use:
+`env/setup.sh` documents the install order and the one pin that had to move:
+ComfyUI 0.34's `comfy-kitchen` needs a newer torch than TrajectoryForcing pins,
+so this runs torch 2.8.0+cu128. `requirements.txt` says why that is safe here and
+where it would not be.
+
+### Option B: a Slurm cluster
+
+```bash
+./serve.sh                 # or ./serve.sh 8188
+```
+
+Allocates a GPU node, streams the log to your terminal, and **Ctrl-C cancels the
+job** — `srun`, not `sbatch`, so quitting does not leave a GPU allocated until
+the walltime expires. The trade is that the job dies with the terminal, which is
+right for an interactive session and wrong for anything else.
+
+ComfyUI binds the *compute* node, which your laptop cannot route to, so
+`serve.sh` also bridges the login node's `localhost:PORT` to it with `ncat`.
+That avoids an SSH hop from login to compute, which needs a password unless your
+`~/.ssh/authorized_keys` contains your own `~/.ssh/id_*.pub` (`$HOME` is shared
+across nodes, so appending it once fixes that route too). From your laptop:
+
+```bash
+ssh -N -L 8188:localhost:8188 <user>@<login-node>
+```
+
+or nothing at all under VS Code Remote, which forwards `localhost` ports itself.
+
+Tune with `TF_PARTITION`, `TF_QOS`, `TF_TIME`.
+
+### Weights
+
+Both routes resolve these on first use — nothing to download by hand:
 
 | what | where | how |
 |---|---|---|
 | flow checkpoint | `ComfyUI/models/trajectory_forcing/` | dropdown; `auto` downloads `TF_L_edit` into it |
 | RAE decoder | `TrajectoryForcing/checkpoints/rae/` | reused if present, else downloaded; override with `TF_RAE_ROOT` |
 
-On a Slurm cluster, `sbatch slurm/comfyui.sbatch` runs the server on a GPU node
-and prints the SSH port-forward to reach it.
+---
+
+## Start here
+
+Four example workflows, walked through in
+**[workflows/README.md](workflows/README.md)** and self-documenting on the
+canvas — each opens with a note explaining it, with the nodes boxed into
+numbered groups.
+
+| | | runs as-is? |
+|---|---|---|
+| `01-generate-and-decode` | the method, no editing | yes |
+| `02-feature-edit-coords` | change a region's content | yes |
+| `03-feature-edit-painter` | the same, with a brush | needs two runs |
+| `04-shape-edit` | move a region's boundary | yes |
+
+---
 
 ## The nodes
 
@@ -73,12 +141,13 @@ All under the **TrajectoryForcing** category.
 | **TF ImageNet Class** | Pick a class by name, get its id. |
 | **TF Generate** | Samples one full trajectory. Outputs every level, not just the last. |
 | **TF Decode Levels** | RAE-decodes all levels, the final one, or a single one. |
-| **TF Latent Preview (PCA)** | The token grid as PCA false colour -- far cheaper than decoding, and it shows the structure the edits act on. `palette_from` fits the colours jointly with a second trajectory so two images are comparable. |
-| **TF Levels Info** | Shape, class, seed, and the edit history of a trajectory. |
+| **TF Latent Preview (PCA)** | The token grid as PCA false colour — far cheaper than decoding, and it shows the structure the edits act on. `palette_from` fits the colours jointly with a second trajectory so two images are comparable. |
+| **TF Levels Info** | Shape, class id and name, seed, and the edit history of a trajectory. |
+| **TF Compare Levels** | What changed between two trajectories, per level and per token: a report, and a heatmap of where. Answers "did the edit do anything" with a number instead of eyeballs — an edit at *l\** should leave every level below it untouched. |
 
 ### Choosing what to edit
 
-TF's edits operate on regions of a 16x16 token grid, which is not a resolution
+TF's edits operate on regions of a 16×16 token grid, which is not a resolution
 any ComfyUI mask tool knows about. Rather than a bespoke canvas widget, **TF
 Level Canvas** renders a level as a paintable image with the token grid drawn
 on, core **Painter** supplies the brush, and **TF Tokens From Mask** converts
@@ -87,7 +156,7 @@ what was painted back down to tokens.
 | node | what it does |
 |---|---|
 | **TF Level Canvas** | One level as a 512px canvas: PCA latent or decoded RGB, with the token grid, region boundaries, and an existing selection drawn on. Feed it to Painter. |
-| **TF Region Map** | Clusters a level's tokens into connected regions by cosine similarity. These are the *R* in the paper's edits. The threshold sets granularity -- 0.9 gave ~50 regions over 256 tokens at level 2. |
+| **TF Region Map** | Clusters a level's tokens into connected regions by cosine similarity. These are the *R* in the paper's edits. The threshold sets granularity — 0.9 gives ~50 regions over 256 tokens at level 2. Its `level` output is worth wiring into the edit node, so the two cannot drift apart. |
 | **TF Tokens From Mask** | Painted mask → token selection. A token counts once enough of its footprint is painted, so a stroke clipping a corner does not overwrite that token's whole feature vector. Wire a region map in to snap a rough stroke to whole regions. |
 | **TF Tokens From Coords** | Type `row,col` pairs (`7,6:9` is a run). Reproducible in a way a brush stroke is not, which is what a written-up experiment needs. |
 | **TF Tokens Combine** | Union / intersection / difference / invert, to build a region up from several strokes. |
@@ -95,107 +164,82 @@ what was painted back down to tokens.
 
 ### Editing and resuming
 
-Both edits reduce to the paper's one primitive -- `z̃ᵢ = f_src` for the selected
-tokens -- and differ only in where `f_src` comes from. Neither samples anything;
+Both edits reduce to the paper's one primitive — `z̃ᵢ = f_src` for the selected
+tokens — and differ only in where `f_src` comes from. Neither samples anything;
 they produce the edited canvas at level *l\**, and **TF Resume From Level** is
 what propagates it.
 
 | node | what it does |
 |---|---|
-| **TF Feature Edit** | Replaces the target tokens' features with one sourced from elsewhere -- same trajectory or a second one. `region mean` is the paper's `f_src` (one averaged vector fills the target); `token cycle` copies token-for-token. `strength` interpolates rather than replacing. |
+| **TF Feature Edit** | Replaces the target tokens' features with one sourced from elsewhere — same trajectory or a second one. `region mean` is the paper's `f_src` (one averaged vector fills the target); `token cycle` copies token-for-token. `strength` interpolates rather than replacing. |
 | **TF Shape Edit** | Hands boundary tokens from one region to a neighbour: they take on the *receiving region's* mean feature, so its extent changes and its content does not. |
-| **TF Resume From Level** | Re-samples every level above *l\**, conditioned on the canvas sitting there. Levels below are untouched -- sampling is Markov in the level index, so an edit only ever propagates upward. `follow_edit` picks up *l\** from the upstream edit node. |
+| **TF Resume From Level** | Re-samples every level above *l\**, conditioned on the canvas sitting there. Levels below are untouched — sampling is Markov in the level index, so an edit only ever propagates upward. `follow_edit` picks up *l\** from the upstream edit node. |
 | **TF Save / Load Levels** | A trajectory to and from `output/trajectory_forcing/*.npz`, with its class, seed and edit history. A trajectory costs GPU time and is what every edit is measured against; reloading the exact one an earlier run used is what makes two edits comparable. |
+
+**Most nodes need no `pipeline` wire.** A trajectory carries the pipeline that
+produced it, so TF Decode, TF Latent Preview, TF Level Canvas, TF Resume and TF
+Compare all find it on their own. The socket is there as an override, and for a
+trajectory restored by TF Load Levels, which has none.
+
+**A selection remembers which level's regions it was snapped to,** and the edit
+nodes refuse to apply it at a different one. Every level shares the same token
+grid, so without that check the edit lands on the wrong region and nothing says
+so.
 
 Coarser edits (small *l\**) cascade through more levels and have broad semantic
 impact; finer edits stay spatially local. A stack that has been edited but not
 resumed is marked, and **TF Decode Levels** warns rather than silently showing
 you the pre-edit trajectory above *l\**.
 
-## Example workflows
+---
 
-`workflows/` holds four, generated from the live node schemas by
-`scripts/make_workflows.py` rather than written by hand -- LiteGraph stores
-widget values positionally, so a hand-written file drifts silently when a widget
-is added. Each is emitted twice: LiteGraph format for the **Open** menu, and API
-format under `workflows/api/` for `POST /prompt`.
+## Troubleshooting
 
-| workflow | |
-|---|---|
-| `01-generate-and-decode` | The vertical slice: one trajectory, every level, decoded and as PCA. |
-| `02-feature-edit-coords` | Cross-image feature edit driven by typed coordinates. Runs as-is, no painting; the reproducible version. |
-| `03-feature-edit-painter` | The same edit, painted. Run once to get the canvas, paint on the Painter node, run again. |
-| `04-shape-edit` | Moving a region boundary instead of a feature. |
+**"Nothing painted yet" in workflow 03.** Working as intended — that workflow
+needs two runs. See
+[workflows/README.md](workflows/README.md#03--feature-edit-painter).
 
-## Tests
+**The first run takes minutes.** Loading the checkpoint plus an XLA compile.
+Once per ComfyUI start; later runs take about a second. `warmup` on *TF Load
+Pipeline* moves the cost to load time so it does not look like a hung prompt.
 
-```bash
-pytest tests                      # 132 tests, no GPU, ~4 s
-sbatch slurm/gpu_smoke.sbatch     # the nodes against the real model
-sbatch slurm/server_smoke.sbatch  # the workflows through a real ComfyUI server
-```
+**`Could not find the TrajectoryForcing checkout`.** Set `TF_REPO`, or put the
+checkout next to this directory.
 
-The unit tests cover the edit math, the payload types, the drawing, and every
-node's schema and `execute` against a stub pipeline -- including that each
-schema input matches the `execute` parameter it feeds, which is otherwise
-invisible until someone queues the node in a browser.
+**`ERROR: CUDA is not available`.** The GPU is not visible to Python. Check
+`nvidia-smi`, and that the venv was built on the same machine.
 
-The two Slurm jobs exist because they catch different things, and both caught
-real bugs that the unit tests could not:
+**Out of memory with another model in the graph.** JAX and torch share the card,
+and `comfy.model_management` cannot see JAX's allocations. Set
+`TF_XLA_MEM_FRACTION=0.3` to cap JAX and pass ComfyUI a matching
+`--reserve-vram`; the note in `run_comfyui.sh` explains why a cap and
+grow-on-demand are alternatives rather than a pair.
 
-* `gpu_smoke` runs the nodes directly against the real TF-L model. Its exit
-  criteria are in the script's docstring and include a control -- the same class
-  and seed must reproduce the trajectory bit-for-bit, or the run is void.
-* `server_smoke` starts a real ComfyUI server and executes the workflows through
-  it. This is what covers ComfyUI's own validation of the custom socket types,
-  and whether the generated workflows are executable rather than merely
-  well-formed. It found the import bug described below.
+**An edit appears to do nothing.** Wire *TF Compare Levels* to the before and
+after trajectories: it reports tokens changed per level. If the answer is zero,
+check the *what was selected* preview — most often the selection is not where
+you thought. If the levels above your edit look stale, *TF Resume From Level*
+has not run.
 
-## Two things worth knowing if you touch this
+**"built from level N's regions but is being applied at level M".** A selection
+was snapped to a region map from a different level. Point *TF Region Map* at the
+level you are editing, or wire its `level` output into the edit node.
 
-**TrajectoryForcing and ComfyUI both own a top-level `utils`.** TF is a flat
-repo whose code imports `utils`, `models`, `configs` and `third_party` by those
-bare names; ComfyUI ships its own `utils` package. Putting TF's root on
-`sys.path` is not enough and is actively harmful in both directions, so
-`tf_nodes/tf_import.py` swaps the two namespaces instead of merging them. Every
-call into TF has to happen inside `tf_scope()` -- not just the import -- because
-the RAE decoder imports `utils.logging_util` and `third_party.rae_decoder`
-lazily, from inside functions that first run at decode time.
-
-**None of TF's directories has an `__init__.py`**, so they are all PEP 420
-namespace packages, and CPython gives a namespace package `__file__ = None`
-rather than no `__file__`. `inspect.getmodule` walks `sys.modules` guarded by
-`hasattr(m, "__file__")`, passes that guard, and dies in `inspect.getfile` --
-but only once the name has previously been recorded with a real path, which is
-exactly what the namespace swap arranges. pydantic calls `getmodule` while
-building a model class and wandb builds pydantic models while TF imports it, so
-this crashed TF Load Pipeline inside a running server while the identical import
-succeeded in a bare script. `tf_import.py` binds every namespace directory in
-TF's tree up front with the null `__file__` removed;
-`tests/test_tf_import.py::test_a_swapped_module_does_not_break_a_sys_modules_walk`
-reproduces the crash.
-
-## JAX and PyTorch on one card
-
-`XLA_PYTHON_CLIENT_PREALLOCATE=false` is the important setting: at its default
-JAX claims ~75% of the card the moment it initialises, and
-`comfy.model_management` cannot see that allocation, so it keeps loading torch
-models into VRAM that is already gone. `run_comfyui.sh` sets it before ComfyUI
-starts; the extension sets the same values at load as a fallback, so ComfyUI
-started any other way still works, and anything already exported wins.
-
-A hard ceiling on JAX's share is available but off by default: `MEM_FRACTION`
-only sizes the *preallocated* block, so growth-on-demand and a cap are
-alternatives rather than a pair. `TF_XLA_MEM_FRACTION=0.3 ./run_comfyui.sh`
-flips both and passes ComfyUI a matching `--reserve-vram`. TF-L plus the ViT-XL
-decoder is a few GB, so the cap is only worth it in a workflow that also loads
-something big.
+---
 
 ## Not here
 
 **TF-2.0 (text conditioning)** has no trained checkpoints, so a `TF Text Encode`
 node would have nothing to load against. **Trajectory Dreamer** (the 3D work) is
-a separate project and is not touched here.
+a separate project.
+
+---
+
+## Contributing
+
+Architecture, tests, and the sharp edges worth knowing before changing anything:
+**[CONTRIBUTING.md](CONTRIBUTING.md)**. Design history and the reasoning behind
+each pivot: **[PLAN.md](PLAN.md)**.
 
 ## Citation
 

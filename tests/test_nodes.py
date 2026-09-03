@@ -219,7 +219,7 @@ class TestGenerateAndDecode:
         assert ("pca_tiles", True) in pipeline.calls
 
     def test_levels_info_reports_the_history(self, node_classes, levels):
-        info, n, class_id, seed = node(node_classes, "TFLevelsInfo").execute(levels=levels)
+        info, n, class_id, class_name, seed = node(node_classes, "TFLevelsInfo").execute(levels=levels)
         assert (n, class_id, seed) == (LEVELS, 213, 1)
         assert "stub" in info
 
@@ -229,7 +229,7 @@ class TestGenerateAndDecode:
 # ---------------------------------------------------------------------------
 class TestRegionNodes:
     def test_region_map_finds_two_regions(self, node_classes, two_region_levels):
-        regions, image, count = node(node_classes, "TFRegionMap").execute(
+        regions, image, count, level_out = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=256
         )
         assert count == 2
@@ -247,7 +247,7 @@ class TestRegionNodes:
         assert "1 tokens" in info
 
     def test_tokens_from_mask_snapped_to_a_region(self, node_classes, two_region_levels):
-        regions, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128
         )
         mask = torch.zeros((1, 64, 64))
@@ -257,6 +257,72 @@ class TestRegionNodes:
         )
         assert count == GRID * GRID // 2
         assert all(c < GRID // 2 for _, c in tokens.coords)
+
+    @staticmethod
+    def _blocked_reason(out, schema):
+        """The stop is one silent blocker per output, plus the reason as node text.
+
+        A message-carrying `block_execution` would instead be reported to the
+        browser as "Node threw an error during execution", and only on the first
+        run -- the second finds the node cached and blocks in silence. Both
+        halves of that are what these tests pin down.
+        """
+        from comfy_execution.graph_utils import ExecutionBlocker
+
+        assert out.block_execution is None, "a message here becomes an error dialog"
+        assert out.result is not None and len(out.result) == len(schema.outputs), (
+            "one blocker per declared output; fewer leaves the node's outputs "
+            "empty and ComfyUI's cache bookkeeping raises IndexError"
+        )
+        assert all(isinstance(r, ExecutionBlocker) for r in out.result)
+        assert all(r.message is None for r in out.result), "a message blocks loudly"
+        return " ".join(out.ui.as_dict()["text"])
+
+    def test_an_unpainted_mask_stops_quietly_and_says_why(self, node_classes, levels):
+        cls = node(node_classes, "TFTokensFromMask")
+        out = cls.execute(
+            mask=torch.zeros((1, 64, 64)), levels=levels, coverage=0.5,
+            regions=None, region_overlap=0.3,
+        )
+        assert "Nothing painted yet" in self._blocked_reason(out, cls.define_schema())
+
+    def test_the_notice_survives_a_cached_rerun(self, node_classes):
+        # Without has_intermediate_output the text shows on the first run and is
+        # gone on the second, when the node is served from cache.
+        assert node(node_classes, "TFTokensFromMask").define_schema().has_intermediate_output
+
+    def test_a_stroke_too_thin_to_count_says_so(self, node_classes, levels):
+        cls = node(node_classes, "TFTokensFromMask")
+        mask = torch.zeros((1, 64, 64))
+        mask[0, 0:2, 0:2] = 1.0  # 4 of a token's 64 pixels
+        out = cls.execute(
+            mask=mask, levels=levels, coverage=0.5, regions=None, region_overlap=0.3,
+        )
+        assert "no token reached 0.50 coverage" in self._blocked_reason(out, cls.define_schema())
+
+    def test_a_stroke_missing_every_region_says_so(self, node_classes, two_region_levels):
+        cls = node(node_classes, "TFTokensFromMask")
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+            levels=two_region_levels, level=2, cosine_threshold=0.9, size=128
+        )
+        mask = torch.zeros((1, 64, 64))
+        mask[0, 0:8, 0:8] = 1.0  # one token of a 32-token region
+        out = cls.execute(
+            mask=mask, levels=two_region_levels, coverage=0.5,
+            regions=regions, region_overlap=0.9,
+        )
+        reason = self._blocked_reason(out, cls.define_schema())
+        assert "no region reached the 0.90 overlap threshold" in reason
+
+    def test_a_real_selection_reports_itself_in_the_node(self, node_classes, levels):
+        mask = torch.zeros((1, 64, 64))
+        mask[0, 0:8, 0:8] = 1.0
+        out = node(node_classes, "TFTokensFromMask").execute(
+            mask=mask, levels=levels, coverage=0.5, regions=None, region_overlap=0.3,
+        )
+        assert out.block_execution is None
+        assert out[1] == 1
+        assert "1 tokens selected" in " ".join(out.ui.as_dict()["text"])
 
     def test_tokens_from_coords(self, node_classes, levels):
         tokens, count, _ = node(node_classes, "TFTokensFromCoords").execute(
@@ -284,7 +350,7 @@ class TestRegionNodes:
         for view in ("latent PCA", "decoded RGB"):
             image, level = node(node_classes, "TFLevelCanvas").execute(
                 pipeline=pipeline, levels=levels, level=2, view=view,
-                draw_grid=True, size=256, regions=None, highlight=None,
+                draw_grid=True, label_coords=True, size=256, regions=None, highlight=None,
             )
             assert image.shape == (1, 256, 256, 3)
             assert level == 2
@@ -292,7 +358,7 @@ class TestRegionNodes:
     def test_level_canvas_clamps_an_out_of_range_level(self, node_classes, pipeline, levels):
         _, level = node(node_classes, "TFLevelCanvas").execute(
             pipeline=pipeline, levels=levels, level=15, view="latent PCA",
-            draw_grid=False, size=128, regions=None, highlight=None,
+            draw_grid=False, label_coords=False, size=128, regions=None, highlight=None,
         )
         assert level == LEVELS - 1
 
@@ -302,7 +368,7 @@ class TestRegionNodes:
         with pytest.raises(ValueError, match="token grid is"):
             node(node_classes, "TFLevelCanvas").execute(
                 pipeline=pipeline, levels=levels, level=0, view="latent PCA",
-                draw_grid=False, size=128, regions=None,
+                draw_grid=False, label_coords=False, size=128, regions=None,
                 highlight=TokenSelection(mask=np.ones((16, 16), dtype=bool)),
             )
 
@@ -384,7 +450,7 @@ class TestEditNodes:
             )
 
     def test_shape_edit_moves_a_boundary_without_changing_features(self, node_classes, two_region_levels):
-        regions, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128
         )
         boundary = self._tokens(node_classes, two_region_levels, "0,4")   # leftmost right-region token
@@ -399,7 +465,7 @@ class TestEditNodes:
         assert "shape edit" in info
 
     def test_shape_edit_rejects_a_region_map_from_another_level(self, node_classes, two_region_levels):
-        regions, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=1, cosine_threshold=0.9, size=128
         )
         with pytest.raises(ValueError, match="built on level 1"):
@@ -411,7 +477,7 @@ class TestEditNodes:
             )
 
     def test_shape_edit_rejects_one_region_talking_to_itself(self, node_classes, two_region_levels):
-        regions, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128
         )
         with pytest.raises(ValueError, match="two different regions"):
@@ -517,3 +583,222 @@ class TestSaveLoad:
         monkeypatch.setattr(nodes_io, "_output_dir", lambda: tmp_path)
         with pytest.raises(FileNotFoundError, match="No saved trajectory"):
             node(node_classes, "TFLoadLevels").execute(file="nope.npz", path_override="")
+
+
+class TestPipelineTravelsWithTheTrajectory:
+    """TF_LEVELS carries the pipeline that made it, so consumers need no wire.
+
+    Six TF_PIPELINE wires crossed one example workflow before this; the socket
+    survives only as an override and for trajectories restored from disk.
+    """
+
+    def test_generate_attaches_the_pipeline(self, node_classes, pipeline):
+        stack, = node(node_classes, "TFGenerate").execute(
+            pipeline=pipeline, class_id=1, seed=1)
+        assert stack.pipeline is pipeline
+
+    def test_decode_finds_it_without_a_wire(self, node_classes, pipeline):
+        stack, = node(node_classes, "TFGenerate").execute(
+            pipeline=pipeline, class_id=1, seed=1)
+        images, _ = node(node_classes, "TFDecode").execute(
+            levels=stack, which="all levels", level=0, label_levels=False)
+        assert images.shape[0] == LEVELS
+
+    def test_resume_passes_it_on(self, node_classes, pipeline):
+        stack, = node(node_classes, "TFGenerate").execute(
+            pipeline=pipeline, class_id=1, seed=1)
+        out, _ = node(node_classes, "TFResumeFromLevel").execute(
+            levels=stack, level=1, follow_edit=False, class_id=-1, seed=2)
+        assert out.pipeline is pipeline
+
+    def test_an_explicit_pipeline_overrides_the_carried_one(self, node_classes, pipeline):
+        other = StubPipeline()
+        stack, = node(node_classes, "TFGenerate").execute(
+            pipeline=pipeline, class_id=1, seed=1)
+        node(node_classes, "TFDecode").execute(
+            levels=stack, which="final level only", level=0,
+            label_levels=False, pipeline=other)
+        assert any(c[0] == "generate" for c in pipeline.calls)
+        assert not other.calls, "decode uses no recorded call, but the override must be the one used"
+
+    def test_a_trajectory_from_disk_says_what_to_wire(self, node_classes, levels):
+        # `levels` is built directly, as TF Load Levels builds one: no pipeline.
+        assert levels.pipeline is None
+        with pytest.raises(ValueError, match="Wire TF Load Pipeline"):
+            node(node_classes, "TFDecode").execute(
+                levels=levels, which="all levels", level=0, label_levels=False)
+
+
+class TestLevelAgreement:
+    """A selection snapped to one level's regions must not be applied at another.
+
+    Every level shares a token grid, so the shapes match and the result looks
+    plausible while being the wrong region entirely. TF Shape Edit always caught
+    this; TF Feature Edit silently accepted it.
+    """
+
+    def _regions_at(self, node_classes, stack, level):
+        regions, _, _, level_out = node(node_classes, "TFRegionMap").execute(
+            levels=stack, level=level, cosine_threshold=0.9, size=64)
+        assert level_out == level, "TF Region Map reports the level it clustered"
+        return regions
+
+    def test_region_map_level_output_can_drive_the_edit(self, node_classes, two_region_levels):
+        regions = self._regions_at(node_classes, two_region_levels, 2)
+        assert regions.level == 2
+
+    def test_feature_edit_rejects_a_selection_from_another_level(
+            self, node_classes, two_region_levels):
+        regions = self._regions_at(node_classes, two_region_levels, 2)
+        target, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=two_region_levels, regions=regions)
+        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="7,7", levels=two_region_levels)
+        with pytest.raises(ValueError, match="level 2's regions but is being applied at level 1"):
+            node(node_classes, "TFFeatureEdit").execute(
+                levels=two_region_levels, level=1, target_tokens=target, source_tokens=source,
+                source_mode="region mean", strength=1.0, source_level=1, source_levels=None)
+
+    def test_a_matching_level_is_fine(self, node_classes, two_region_levels):
+        regions = self._regions_at(node_classes, two_region_levels, 2)
+        target, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=two_region_levels, regions=regions)
+        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="7,7", levels=two_region_levels)
+        out, _ = node(node_classes, "TFFeatureEdit").execute(
+            levels=two_region_levels, level=2, target_tokens=target, source_tokens=source,
+            source_mode="region mean", strength=1.0, source_level=2, source_levels=None)
+        assert out.dirty_level == 2
+
+    def test_an_unsnapped_selection_is_accepted_anywhere(self, node_classes, two_region_levels):
+        # Typed coordinates with no region map name no level, so they carry none.
+        plain, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=two_region_levels)
+        assert plain.level is None
+        node(node_classes, "TFFeatureEdit").execute(
+            levels=two_region_levels, level=0, target_tokens=plain, source_tokens=plain,
+            source_mode="region mean", strength=1.0, source_level=0, source_levels=None)
+
+    def test_combining_selections_from_two_levels_is_refused(
+            self, node_classes, two_region_levels):
+        a_tokens, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=two_region_levels,
+            regions=self._regions_at(node_classes, two_region_levels, 1))
+        b_tokens, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="0,0", levels=two_region_levels,
+            regions=self._regions_at(node_classes, two_region_levels, 2))
+        with pytest.raises(ValueError, match="level 1's regions with one from level 2"):
+            node(node_classes, "TFTokensCombine").execute(
+                a=a_tokens, operation="union", b=b_tokens)
+
+
+class TestCoordinateErgonomics:
+    def test_coords_need_no_levels_wire(self, node_classes):
+        tokens, count, _ = node(node_classes, "TFTokensFromCoords").execute(coords="15,15")
+        assert count == 1 and tokens.mask.shape == (16, 16), "defaults to the released 16x16 grid"
+
+    def test_coords_still_honour_a_wired_grid(self, node_classes, levels):
+        with pytest.raises(ValueError, match="outside"):
+            node(node_classes, "TFTokensFromCoords").execute(coords="15,15", levels=levels)
+
+    def test_the_canvas_can_number_its_axes(self, node_classes, pipeline):
+        stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=1, seed=1)
+        kw = dict(levels=stack, level=2, view="latent PCA", draw_grid=True,
+                  size=256, regions=None, highlight=None)
+        plain, _ = node(node_classes, "TFLevelCanvas").execute(label_coords=False, **kw)
+        ticked, _ = node(node_classes, "TFLevelCanvas").execute(label_coords=True, **kw)
+        assert plain.shape == ticked.shape
+        assert not torch.equal(plain, ticked), "labels should actually be drawn"
+
+    def test_levels_info_names_the_class(self, node_classes, pipeline):
+        stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=213, seed=1)
+        _, _, class_id, class_name, _ = node(node_classes, "TFLevelsInfo").execute(levels=stack)
+        assert class_id == 213
+        assert class_name == "Irish setter"
+
+
+class TestCompareLevels:
+    """The node that answers "did the edit do anything, and where"."""
+
+    def _edit_and_resume(self, node_classes, pipeline, level=2):
+        before, = node(node_classes, "TFGenerate").execute(
+            pipeline=pipeline, class_id=213, seed=1)
+        target, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="1,1", levels=before)
+        # A different source token: writing a token's own value onto itself is
+        # an identity edit, and then only the re-sampled levels above it move.
+        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+            coords="5,5", levels=before)
+        edited, _ = node(node_classes, "TFFeatureEdit").execute(
+            levels=before, level=level, target_tokens=target, source_tokens=source,
+            source_mode="region mean", strength=1.0, source_level=level, source_levels=None)
+        after, _ = node(node_classes, "TFResumeFromLevel").execute(
+            levels=edited, level=level, follow_edit=True, class_id=-1, seed=1)
+        return before, after
+
+    def test_identical_trajectories_report_no_change(self, node_classes, pipeline):
+        stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=1, seed=1)
+        report, images, changed, peak = node(node_classes, "TFCompareLevels").execute(
+            before=stack, after=stack, size=256, decode_difference=False)
+        assert changed == 0
+        assert peak == 0.0
+        assert "Nothing changed" in report
+        assert images.shape[0] == LEVELS, "one heatmap tile per level"
+
+    def test_it_localises_the_edit_to_the_right_levels(self, node_classes, pipeline):
+        before, after = self._edit_and_resume(node_classes, pipeline, level=2)
+        report, _, changed, peak = node(node_classes, "TFCompareLevels").execute(
+            before=before, after=after, size=256, decode_difference=False)
+        assert changed > 0 and peak > 0
+        # the stub re-samples only above the edited level, so 0..1 must be clean
+        assert "First level that differs: 2." in report
+        assert "Levels 0..1 are untouched" in report
+
+    def test_the_report_has_a_row_per_level(self, node_classes, pipeline):
+        before, after = self._edit_and_resume(node_classes, pipeline)
+        report, _, _, _ = node(node_classes, "TFCompareLevels").execute(
+            before=before, after=after, size=256, decode_difference=False)
+        for level in range(LEVELS):
+            assert f"Level {level}" in report
+
+    def test_decoding_the_difference_adds_a_frame(self, node_classes, pipeline):
+        before, after = self._edit_and_resume(node_classes, pipeline)
+        plain, _, _, _ = node(node_classes, "TFCompareLevels").execute(
+            before=before, after=after, size=256, decode_difference=False)
+        report, images, _, _ = node(node_classes, "TFCompareLevels").execute(
+            before=before, after=after, size=256, decode_difference=True)
+        assert images.shape[0] == LEVELS + 1
+        assert "mean |delta|" in report and "mean |delta|" not in plain
+
+    def test_frames_are_all_the_same_size(self, node_classes, pipeline):
+        # to_image stacks them into one batch; numpy will not stack ragged frames,
+        # and a decoded difference is a different size from a heatmap tile.
+        before, after = self._edit_and_resume(node_classes, pipeline)
+        _, images, _, _ = node(node_classes, "TFCompareLevels").execute(
+            before=before, after=after, size=640, decode_difference=True)
+        assert images.shape[0] == LEVELS + 1
+
+    def test_mismatched_trajectories_are_refused(self, node_classes, pipeline):
+        from tf_nodes.data import LevelStack
+
+        stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=1, seed=1)
+        odd = LevelStack(latents=np.zeros((2, 4, 4, 3), np.float32), class_id=1, seed=1)
+        with pytest.raises(ValueError, match="not two versions of the same trajectory"):
+            node(node_classes, "TFCompareLevels").execute(
+                before=stack, after=odd, size=256, decode_difference=False)
+
+    def test_a_zero_token_does_not_produce_a_nan(self, node_classes, pipeline):
+        # A collapsed token has no direction, so cosine is 0/0. That is a result
+        # to report, not a NaN to average into every statistic.
+        from tf_nodes.data import LevelStack
+
+        a = np.ones((LEVELS, GRID, GRID, CHANNELS), np.float32)
+        b = a.copy()
+        b[2, 0, 0] = 0.0
+        before = LevelStack(latents=a, class_id=1, seed=1, pipeline=pipeline)
+        after = LevelStack(latents=b, class_id=1, seed=1, pipeline=pipeline)
+        report, _, changed, peak = node(node_classes, "TFCompareLevels").execute(
+            before=before, after=after, size=256, decode_difference=False)
+        assert changed == 1
+        assert np.isfinite(peak) and peak == 1.0
+        assert "nan" not in report.lower()

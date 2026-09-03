@@ -80,6 +80,47 @@ def draw_grid(image: np.ndarray, grid: tuple[int, int]) -> np.ndarray:
     return out
 
 
+TICK_EVERY = 4
+TICK_INK = (226, 232, 240)
+TICK_SHADOW = (12, 18, 30)
+
+
+def draw_ticks(image: np.ndarray, grid: tuple[int, int], every: int = TICK_EVERY) -> np.ndarray:
+    """Number the token rows and columns along the top and left edges.
+
+    Coordinates for the edit nodes are typed as `row,col` on this grid, and
+    without labels the only way to find one is to count cells by eye. Every
+    fourth line keeps it readable at 16 wide without becoming a ruler.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    arr = np.asarray(image, dtype=np.uint8)
+    gh, gw = int(grid[0]), int(grid[1])
+    cell = arr.shape[0] / max(1, gh)
+    size = max(9, min(15, int(cell * 0.42)))
+    canvas = Image.fromarray(np.array(arr, copy=True))
+    draw = ImageDraw.Draw(canvas)
+    try:
+        font = ImageFont.truetype("DejaVuSansMono.ttf", size)
+    except OSError:
+        font = ImageFont.load_default(size)
+
+    def label(text: str, x: int, y: int) -> None:
+        # Drawn twice: the grids underneath range from near-white to near-black,
+        # so a single colour is illegible on one or the other.
+        for dx, dy in ((1, 1), (-1, -1), (1, -1), (-1, 1)):
+            draw.text((x + dx, y + dy), text, fill=TICK_SHADOW, font=font)
+        draw.text((x, y), text, fill=TICK_INK, font=font)
+
+    rows, cols = _cells(arr, grid)
+    for c in range(0, gw, every):
+        label(str(c), cols[c] + 3, 2)
+    for r in range(0, gh, every):
+        if r:  # the 0,0 corner already carries the column label
+            label(str(r), 3, rows[r] + 2)
+    return np.asarray(canvas, dtype=np.uint8)
+
+
 def draw_selection(image: np.ndarray, selection: TokenSelection) -> np.ndarray:
     """Outline and tint the selected tokens."""
     out = np.array(image, dtype=np.uint8, copy=True)

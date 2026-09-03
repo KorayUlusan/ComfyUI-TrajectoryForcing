@@ -1,5 +1,5 @@
 {
-  "1": {
+  "2": {
     "class_type": "TFLoadPipeline",
     "inputs": {
       "checkpoint": "auto (download TF_L_edit)",
@@ -10,39 +10,39 @@
       "title": "TF Load Pipeline"
     }
   },
-  "2": {
+  "3": {
     "class_type": "TFGenerate",
     "inputs": {
       "pipeline": [
-        "1",
+        "2",
         0
       ],
       "class_id": 213,
       "seed": 592
     },
     "_meta": {
-      "title": "target"
+      "title": "target \u2014 the image being edited"
     }
   },
-  "3": {
+  "4": {
     "class_type": "TFGenerate",
     "inputs": {
       "pipeline": [
-        "1",
+        "2",
         0
       ],
       "class_id": 207,
       "seed": 592
     },
     "_meta": {
-      "title": "source"
+      "title": "source \u2014 where the new feature comes from"
     }
   },
-  "4": {
+  "5": {
     "class_type": "TFRegionMap",
     "inputs": {
       "levels": [
-        "2",
+        "3",
         0
       ],
       "level": 2,
@@ -53,35 +53,47 @@
       "title": "TF Region Map"
     }
   },
-  "5": {
+  "6": {
     "class_type": "TFLevelCanvas",
     "inputs": {
-      "pipeline": [
-        "1",
-        0
-      ],
       "levels": [
-        "2",
+        "3",
         0
       ],
-      "level": 2,
+      "level": [
+        "5",
+        3
+      ],
       "view": "latent PCA",
       "draw_grid": true,
+      "label_coords": true,
       "size": 512,
       "regions": [
-        "4",
+        "5",
         0
       ]
     },
     "_meta": {
-      "title": "paint over this"
+      "title": "the canvas \u2014 this is what you paint on"
     }
   },
-  "6": {
+  "7": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "6",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "run once to see this, then paint"
+    }
+  },
+  "8": {
     "class_type": "Painter",
     "inputs": {
       "image": [
-        "5",
+        "6",
         0
       ],
       "mask": "",
@@ -90,64 +102,92 @@
       "bg_color": "#000000"
     },
     "_meta": {
-      "title": "Painter"
+      "title": "PAINT HERE, then press Run again"
     }
   },
-  "7": {
+  "9": {
     "class_type": "TFTokensFromMask",
     "inputs": {
       "mask": [
-        "6",
+        "8",
         1
       ],
       "levels": [
-        "2",
+        "3",
         0
       ],
       "coverage": 0.35,
       "regions": [
-        "4",
+        "5",
         0
       ],
       "region_overlap": 0.3
     },
     "_meta": {
-      "title": "TF Tokens From Mask"
+      "title": "your stroke, snapped to whole regions"
     }
   },
-  "8": {
-    "class_type": "TFTokensFromCoords",
+  "10": {
+    "class_type": "TFTokensPreview",
     "inputs": {
-      "coords": "6,6:9 7,6:9",
-      "levels": [
-        "3",
+      "tokens": [
+        "9",
+        0
+      ],
+      "size": 512
+    },
+    "_meta": {
+      "title": "what your paint actually selected"
+    }
+  },
+  "11": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "10",
         0
       ]
     },
     "_meta": {
-      "title": "source tokens"
+      "title": "PreviewImage"
     }
   },
-  "9": {
+  "12": {
+    "class_type": "TFTokensFromCoords",
+    "inputs": {
+      "coords": "6,6:9 7,6:9",
+      "levels": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "source tokens \u2014 WHAT gets written"
+    }
+  },
+  "13": {
     "class_type": "TFFeatureEdit",
     "inputs": {
       "levels": [
-        "2",
+        "3",
         0
       ],
-      "level": 2,
+      "level": [
+        "5",
+        3
+      ],
       "target_tokens": [
-        "7",
+        "9",
         0
       ],
       "source_tokens": [
-        "8",
+        "12",
         0
       ],
       "source_mode": "region mean",
       "strength": 1.0,
       "source_levels": [
-        "3",
+        "4",
         0
       ],
       "source_level": 2
@@ -156,15 +196,11 @@
       "title": "TF Feature Edit"
     }
   },
-  "10": {
+  "14": {
     "class_type": "TFResumeFromLevel",
     "inputs": {
-      "pipeline": [
-        "1",
-        0
-      ],
       "levels": [
-        "9",
+        "13",
         0
       ],
       "level": 2,
@@ -176,15 +212,11 @@
       "title": "TF Resume From Level"
     }
   },
-  "11": {
+  "15": {
     "class_type": "TFDecode",
     "inputs": {
-      "pipeline": [
-        "1",
-        0
-      ],
       "levels": [
-        "10",
+        "14",
         0
       ],
       "which": "all levels",
@@ -195,41 +227,16 @@
       "title": "TF Decode Levels"
     }
   },
-  "12": {
+  "16": {
     "class_type": "PreviewImage",
     "inputs": {
       "images": [
-        "11",
+        "15",
         0
       ]
     },
     "_meta": {
-      "title": "edited"
-    }
-  },
-  "13": {
-    "class_type": "TFTokensPreview",
-    "inputs": {
-      "tokens": [
-        "7",
-        0
-      ],
-      "size": 512
-    },
-    "_meta": {
-      "title": "what the paint selected"
-    }
-  },
-  "14": {
-    "class_type": "PreviewImage",
-    "inputs": {
-      "images": [
-        "13",
-        0
-      ]
-    },
-    "_meta": {
-      "title": "PreviewImage"
+      "title": "EDITED \u2014 all four levels"
     }
   }
 }

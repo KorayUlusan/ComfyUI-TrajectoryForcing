@@ -1,11 +1,35 @@
 {
   "id": "trajectory-forcing-02-feature-edit-coords",
   "revision": 0,
-  "last_node_id": 14,
-  "last_link_id": 23,
+  "last_node_id": 17,
+  "last_link_id": 24,
   "nodes": [
     {
       "id": 1,
+      "type": "MarkdownNote",
+      "pos": [
+        -356,
+        80
+      ],
+      "size": [
+        400,
+        580
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "# 2. Edit a region, keep the rest\n\n**Press Run \u2014 this one works as-is, no painting needed.**\n\nTwo images are generated: a **target** (the one being edited) and a **source**\n(where the new content comes from). The edit takes the average feature of a\npatch of the source and writes it into a region of the target, at level 2.\nThen every finer level is re-sampled from that edited canvas, so the model\nmakes the change *fit* rather than pasting a rectangle.\n\nLevels below the edit are untouched \u2014 an edit only ever propagates upward.\n\n**Try, in the yellow group:**\n- *target region*: change `7,7` to another `row,col` on the 16\u00d716 grid. It snaps\n  to the whole region containing that token. Every preview here is numbered\n  along its top and left edge, so you can read a coordinate off rather than\n  count cells.\n- *source tokens*: `6,6:9` means row 6, columns 6 through 9.\n- *TF Feature Edit \u2192 level*: 0\u20133. Lower = a bigger, more semantic change.\n- *strength*: below 1.0 blends instead of replacing.\n\nThe bottom-right preview shows exactly which tokens were selected, drawn on the\nlevel you edited. Check it if a result surprises you.\n\n*TF Compare Levels* at the far bottom answers \"did it actually do anything\":\ntokens changed per level, and a heatmap of where. An edit at level 2 should\nleave levels 0 and 1 completely untouched.\n\nThe edit's `level` is wired from *TF Region Map* rather than typed twice \u2014 a\nselection snapped to one level's regions is refused at another, because the\ntoken grid is the same size at every level and it would otherwise land on the\nwrong part of the image without complaining.\n"
+      ],
+      "color": "#432",
+      "bgcolor": "#653",
+      "title": "README \u2014 read me first"
+    },
+    {
+      "id": 2,
       "type": "TFLoadPipeline",
       "pos": [
         80,
@@ -16,7 +40,7 @@
         118
       ],
       "flags": {},
-      "order": 0,
+      "order": 1,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -27,11 +51,7 @@
           "slot_index": 0,
           "links": [
             1,
-            2,
-            11,
-            13,
-            15,
-            17
+            2
           ]
         },
         {
@@ -52,7 +72,7 @@
       ]
     },
     {
-      "id": 2,
+      "id": 3,
       "type": "TFGenerate",
       "pos": [
         460,
@@ -63,7 +83,7 @@
         144
       ],
       "flags": {},
-      "order": 1,
+      "order": 2,
       "mode": 0,
       "inputs": [
         {
@@ -84,7 +104,8 @@
             4,
             7,
             14,
-            18
+            17,
+            22
           ]
         }
       ],
@@ -96,21 +117,21 @@
         592,
         "fixed"
       ],
-      "title": "target"
+      "title": "target \u2014 the image being edited"
     },
     {
-      "id": 3,
+      "id": 4,
       "type": "TFGenerate",
       "pos": [
         460,
-        380
+        440
       ],
       "size": [
         320,
         144
       ],
       "flags": {},
-      "order": 2,
+      "order": 3,
       "mode": 0,
       "inputs": [
         {
@@ -128,7 +149,7 @@
           "slot_index": 0,
           "links": [
             6,
-            10
+            11
           ]
         }
       ],
@@ -140,10 +161,10 @@
         592,
         "fixed"
       ],
-      "title": "source"
+      "title": "source \u2014 where the new feature comes from"
     },
     {
-      "id": 4,
+      "id": 5,
       "type": "TFRegionMap",
       "pos": [
         840,
@@ -154,7 +175,7 @@
         144
       ],
       "flags": {},
-      "order": 3,
+      "order": 4,
       "mode": 0,
       "inputs": [
         {
@@ -188,6 +209,16 @@
           "type": "INT",
           "slot_index": 2,
           "links": []
+        },
+        {
+          "label": "level",
+          "name": "level",
+          "type": "INT",
+          "slot_index": 3,
+          "links": [
+            8,
+            18
+          ]
         }
       ],
       "properties": {
@@ -200,7 +231,7 @@
       ]
     },
     {
-      "id": 5,
+      "id": 6,
       "type": "TFTokensFromCoords",
       "pos": [
         840,
@@ -211,7 +242,7 @@
         118
       ],
       "flags": {},
-      "order": 4,
+      "order": 5,
       "mode": 0,
       "inputs": [
         {
@@ -234,7 +265,7 @@
           "type": "TF_TOKENS",
           "slot_index": 0,
           "links": [
-            8,
+            9,
             20
           ]
         },
@@ -259,21 +290,21 @@
       "widgets_values": [
         "7,7"
       ],
-      "title": "target region"
+      "title": "target region \u2014 WHERE the edit lands"
     },
     {
-      "id": 6,
+      "id": 7,
       "type": "TFTokensFromCoords",
       "pos": [
         840,
-        680
+        740
       ],
       "size": [
         320,
         118
       ],
       "flags": {},
-      "order": 5,
+      "order": 6,
       "mode": 0,
       "inputs": [
         {
@@ -296,7 +327,7 @@
           "type": "TF_TOKENS",
           "slot_index": 0,
           "links": [
-            9
+            10
           ]
         },
         {
@@ -320,10 +351,10 @@
       "widgets_values": [
         "6,6:9 7,6:9"
       ],
-      "title": "source tokens"
+      "title": "source tokens \u2014 WHAT gets written there"
     },
     {
-      "id": 7,
+      "id": 8,
       "type": "TFFeatureEdit",
       "pos": [
         1220,
@@ -331,10 +362,10 @@
       ],
       "size": [
         320,
-        248
+        274
       ],
       "flags": {},
-      "order": 6,
+      "order": 7,
       "mode": 0,
       "inputs": [
         {
@@ -344,22 +375,31 @@
           "link": 7
         },
         {
+          "label": "level",
+          "name": "level",
+          "type": "INT",
+          "link": 8,
+          "widget": {
+            "name": "level"
+          }
+        },
+        {
           "label": "target_tokens",
           "name": "target_tokens",
           "type": "TF_TOKENS",
-          "link": 8
+          "link": 9
         },
         {
           "label": "source_tokens",
           "name": "source_tokens",
           "type": "TF_TOKENS",
-          "link": 9
+          "link": 10
         },
         {
           "label": "source_levels",
           "name": "source_levels",
           "type": "TF_LEVELS",
-          "link": 10
+          "link": 11
         }
       ],
       "outputs": [
@@ -391,7 +431,7 @@
       ]
     },
     {
-      "id": 8,
+      "id": 9,
       "type": "TFResumeFromLevel",
       "pos": [
         1600,
@@ -402,20 +442,20 @@
         222
       ],
       "flags": {},
-      "order": 7,
+      "order": 8,
       "mode": 0,
       "inputs": [
-        {
-          "label": "pipeline",
-          "name": "pipeline",
-          "type": "TF_PIPELINE",
-          "link": 11
-        },
         {
           "label": "levels",
           "name": "levels",
           "type": "TF_LEVELS",
           "link": 12
+        },
+        {
+          "label": "pipeline",
+          "name": "pipeline",
+          "type": "TF_PIPELINE",
+          "link": null
         }
       ],
       "outputs": [
@@ -425,7 +465,8 @@
           "type": "TF_LEVELS",
           "slot_index": 0,
           "links": [
-            16
+            13,
+            23
           ]
         },
         {
@@ -448,62 +489,6 @@
       ]
     },
     {
-      "id": 9,
-      "type": "TFDecode",
-      "pos": [
-        1600,
-        560
-      ],
-      "size": [
-        320,
-        170
-      ],
-      "flags": {},
-      "order": 8,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "pipeline",
-          "name": "pipeline",
-          "type": "TF_PIPELINE",
-          "link": 13
-        },
-        {
-          "label": "levels",
-          "name": "levels",
-          "type": "TF_LEVELS",
-          "link": 14
-        }
-      ],
-      "outputs": [
-        {
-          "label": "images",
-          "name": "images",
-          "type": "IMAGE",
-          "slot_index": 0,
-          "links": [
-            22
-          ]
-        },
-        {
-          "label": "warnings",
-          "name": "warnings",
-          "type": "STRING",
-          "slot_index": 1,
-          "links": []
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "TFDecode"
-      },
-      "widgets_values": [
-        "final level only",
-        2,
-        true
-      ],
-      "title": "before"
-    },
-    {
       "id": 10,
       "type": "TFDecode",
       "pos": [
@@ -519,16 +504,16 @@
       "mode": 0,
       "inputs": [
         {
-          "label": "pipeline",
-          "name": "pipeline",
-          "type": "TF_PIPELINE",
-          "link": 15
-        },
-        {
           "label": "levels",
           "name": "levels",
           "type": "TF_LEVELS",
-          "link": 16
+          "link": 13
+        },
+        {
+          "label": "pipeline",
+          "name": "pipeline",
+          "type": "TF_PIPELINE",
+          "link": null
         }
       ],
       "outputs": [
@@ -538,7 +523,7 @@
           "type": "IMAGE",
           "slot_index": 0,
           "links": [
-            21
+            15
           ]
         },
         {
@@ -561,30 +546,163 @@
     },
     {
       "id": 11,
-      "type": "TFLevelCanvas",
+      "type": "TFDecode",
       "pos": [
-        1220,
-        560
+        1980,
+        440
       ],
       "size": [
         320,
-        248
+        170
       ],
       "flags": {},
       "order": 10,
       "mode": 0,
       "inputs": [
         {
+          "label": "levels",
+          "name": "levels",
+          "type": "TF_LEVELS",
+          "link": 14
+        },
+        {
           "label": "pipeline",
           "name": "pipeline",
           "type": "TF_PIPELINE",
-          "link": 17
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            16
+          ]
         },
+        {
+          "label": "warnings",
+          "name": "warnings",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TFDecode"
+      },
+      "widgets_values": [
+        "final level only",
+        2,
+        true
+      ],
+      "title": "before"
+    },
+    {
+      "id": 12,
+      "type": "PreviewImage",
+      "pos": [
+        2360,
+        80
+      ],
+      "size": [
+        320,
+        66
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 15
+        }
+      ],
+      "outputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "EDITED \u2014 all four levels"
+    },
+    {
+      "id": 13,
+      "type": "PreviewImage",
+      "pos": [
+        2360,
+        440
+      ],
+      "size": [
+        320,
+        66
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 16
+        }
+      ],
+      "outputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "UNEDITED \u2014 for comparison"
+    },
+    {
+      "id": 14,
+      "type": "TFLevelCanvas",
+      "pos": [
+        1980,
+        680
+      ],
+      "size": [
+        320,
+        300
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
         {
           "label": "levels",
           "name": "levels",
           "type": "TF_LEVELS",
-          "link": 18
+          "link": 17
+        },
+        {
+          "label": "level",
+          "name": "level",
+          "type": "INT",
+          "link": 18,
+          "widget": {
+            "name": "level"
+          }
         },
         {
           "label": "regions",
@@ -597,6 +715,12 @@
           "name": "highlight",
           "type": "TF_TOKENS",
           "link": 20
+        },
+        {
+          "label": "pipeline",
+          "name": "pipeline",
+          "type": "TF_PIPELINE",
+          "link": null
         }
       ],
       "outputs": [
@@ -606,7 +730,7 @@
           "type": "IMAGE",
           "slot_index": 0,
           "links": [
-            23
+            21
           ]
         },
         {
@@ -624,22 +748,24 @@
         2,
         "latent PCA",
         true,
+        true,
         512
-      ]
+      ],
+      "title": "the level you edited, with the selection on it"
     },
     {
-      "id": 12,
+      "id": 15,
       "type": "PreviewImage",
       "pos": [
         2360,
-        80
+        680
       ],
       "size": [
         320,
         66
       ],
       "flags": {},
-      "order": 11,
+      "order": 14,
       "mode": 0,
       "inputs": [
         {
@@ -662,28 +788,102 @@
         "Node name for S&R": "PreviewImage"
       },
       "widgets_values": [],
-      "title": "edited, all levels"
+      "title": "what was selected"
     },
     {
-      "id": 13,
+      "id": 16,
+      "type": "TFCompareLevels",
+      "pos": [
+        1980,
+        1340
+      ],
+      "size": [
+        320,
+        170
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "before",
+          "name": "before",
+          "type": "TF_LEVELS",
+          "link": 22
+        },
+        {
+          "label": "after",
+          "name": "after",
+          "type": "TF_LEVELS",
+          "link": 23
+        },
+        {
+          "label": "pipeline",
+          "name": "pipeline",
+          "type": "TF_PIPELINE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "report",
+          "name": "report",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": []
+        },
+        {
+          "label": "heatmap",
+          "name": "heatmap",
+          "type": "IMAGE",
+          "slot_index": 1,
+          "links": [
+            24
+          ]
+        },
+        {
+          "label": "changed_tokens",
+          "name": "changed_tokens",
+          "type": "INT",
+          "slot_index": 2,
+          "links": []
+        },
+        {
+          "label": "max_distance",
+          "name": "max_distance",
+          "type": "FLOAT",
+          "slot_index": 3,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TFCompareLevels"
+      },
+      "widgets_values": [
+        512,
+        false
+      ]
+    },
+    {
+      "id": 17,
       "type": "PreviewImage",
       "pos": [
         2360,
-        380
+        1340
       ],
       "size": [
         320,
         66
       ],
       "flags": {},
-      "order": 12,
+      "order": 16,
       "mode": 0,
       "inputs": [
         {
           "label": "images",
           "name": "images",
           "type": "IMAGE",
-          "link": 22
+          "link": 24
         }
       ],
       "outputs": [
@@ -699,233 +899,270 @@
         "Node name for S&R": "PreviewImage"
       },
       "widgets_values": [],
-      "title": "unedited final"
-    },
-    {
-      "id": 14,
-      "type": "PreviewImage",
-      "pos": [
-        1600,
-        800
-      ],
-      "size": [
-        320,
-        66
-      ],
-      "flags": {},
-      "order": 13,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "images",
-          "name": "images",
-          "type": "IMAGE",
-          "link": 23
-        }
-      ],
-      "outputs": [
-        {
-          "label": "images",
-          "name": "images",
-          "type": "IMAGE",
-          "slot_index": 0,
-          "links": []
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "PreviewImage"
-      },
-      "widgets_values": [],
-      "title": "what is selected"
+      "title": "where it changed, per level"
     }
   ],
   "links": [
     [
       1,
-      1,
-      0,
       2,
-      0,
-      "TF_PIPELINE"
-    ],
-    [
-      2,
-      1,
       0,
       3,
       0,
       "TF_PIPELINE"
     ],
     [
+      2,
+      2,
+      0,
+      4,
+      0,
+      "TF_PIPELINE"
+    ],
+    [
       3,
-      2,
-      0,
-      4,
-      0,
-      "TF_LEVELS"
-    ],
-    [
-      4,
-      2,
+      3,
       0,
       5,
       0,
       "TF_LEVELS"
     ],
     [
-      5,
       4,
+      3,
       0,
+      6,
+      0,
+      "TF_LEVELS"
+    ],
+    [
       5,
+      5,
+      0,
+      6,
       1,
       "TF_REGIONS"
     ],
     [
       6,
-      3,
+      4,
       0,
-      6,
+      7,
       0,
       "TF_LEVELS"
     ],
     [
       7,
-      2,
+      3,
       0,
-      7,
+      8,
       0,
       "TF_LEVELS"
     ],
     [
       8,
       5,
-      0,
-      7,
+      3,
+      8,
       1,
-      "TF_TOKENS"
+      "INT"
     ],
     [
       9,
       6,
       0,
-      7,
+      8,
       2,
       "TF_TOKENS"
     ],
     [
       10,
-      3,
-      0,
       7,
+      0,
+      8,
       3,
-      "TF_LEVELS"
+      "TF_TOKENS"
     ],
     [
       11,
-      1,
+      4,
       0,
       8,
-      0,
-      "TF_PIPELINE"
+      4,
+      "TF_LEVELS"
     ],
     [
       12,
-      7,
-      0,
       8,
-      1,
+      0,
+      9,
+      0,
       "TF_LEVELS"
     ],
     [
       13,
-      1,
-      0,
       9,
       0,
-      "TF_PIPELINE"
+      10,
+      0,
+      "TF_LEVELS"
     ],
     [
       14,
-      2,
+      3,
       0,
-      9,
-      1,
+      11,
+      0,
       "TF_LEVELS"
     ],
     [
       15,
-      1,
-      0,
       10,
       0,
-      "TF_PIPELINE"
+      12,
+      0,
+      "IMAGE"
     ],
     [
       16,
-      8,
+      11,
       0,
-      10,
-      1,
-      "TF_LEVELS"
+      13,
+      0,
+      "IMAGE"
     ],
     [
       17,
-      1,
+      3,
       0,
-      11,
+      14,
       0,
-      "TF_PIPELINE"
-    ],
-    [
-      18,
-      2,
-      0,
-      11,
-      1,
       "TF_LEVELS"
     ],
     [
+      18,
+      5,
+      3,
+      14,
+      1,
+      "INT"
+    ],
+    [
       19,
-      4,
+      5,
       0,
-      11,
+      14,
       2,
       "TF_REGIONS"
     ],
     [
       20,
-      5,
+      6,
       0,
-      11,
+      14,
       3,
       "TF_TOKENS"
     ],
     [
       21,
-      10,
+      14,
       0,
-      12,
+      15,
       0,
       "IMAGE"
     ],
     [
       22,
-      9,
+      3,
       0,
-      13,
+      16,
       0,
-      "IMAGE"
+      "TF_LEVELS"
     ],
     [
       23,
-      11,
+      9,
       0,
-      14,
+      16,
+      1,
+      "TF_LEVELS"
+    ],
+    [
+      24,
+      16,
+      1,
+      17,
       0,
       "IMAGE"
     ]
   ],
-  "groups": [],
+  "groups": [
+    {
+      "id": 1,
+      "title": "1 \u00b7 Load, and generate two images",
+      "bounding": [
+        58,
+        16,
+        744,
+        590
+      ],
+      "color": "#3f789e",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "2 \u00b7 Choose what to edit",
+      "bounding": [
+        818,
+        16,
+        364,
+        864
+      ],
+      "color": "#b58b2a",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 3,
+      "title": "3 \u00b7 Apply it, then re-sample the finer levels",
+      "bounding": [
+        1198,
+        16,
+        744,
+        360
+      ],
+      "color": "#a1309b",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 4,
+      "title": "4 \u00b7 Compare",
+      "bounding": [
+        1958,
+        16,
+        744,
+        986
+      ],
+      "color": "#8A8",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 5,
+      "title": "5 \u00b7 Measure it",
+      "bounding": [
+        1958,
+        1276,
+        744,
+        256
+      ],
+      "color": "#88A",
+      "font_size": 24,
+      "flags": {}
+    }
+  ],
   "config": {},
   "extra": {
     "description": "Cross-image feature edit driven by typed token coordinates: take the mean feature of a region of one trajectory, write it into a region of another, and re-sample the finer levels. Runs as-is with no painting, so it is the reproducible version."

@@ -17,14 +17,18 @@ Exit criteria, fixed before the run:
   3. edit      -- 02's edited output differs from its unedited control branch.
                   A workflow that runs but changes nothing would pass criterion
                   2 while the edit silently did nothing.
-  4. validate  -- 03 (the Painter one) passes prompt validation. It is not
-                  executed: its selection comes from an unpainted mask, so it is
-                  supposed to stop with "target_tokens is empty".
+  4. blocked   -- 03 (the Painter one) stops at TF Tokens From Mask with no
+                  error dialog at all, on *two* consecutive runs -- the bug this
+                  replaced raised on the first run and went silent on the
+                  second, so one run cannot tell the two apart. It must still
+                  produce the canvas to paint on, and the reason must reach the
+                  user as that node's own output text.
 
 Usage (inside a GPU allocation):  python scripts/server_smoke.py [PORT]
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -56,6 +60,7 @@ EXPECTED_NODES = {
     "TFLevelsInfo", "TFLevelCanvas", "TFRegionMap", "TFTokensFromMask",
     "TFTokensFromCoords", "TFTokensCombine", "TFTokensPreview", "TFFeatureEdit",
     "TFShapeEdit", "TFResumeFromLevel", "TFSaveLevels", "TFLoadLevels",
+    "TFCompareLevels",
 }
 
 _results: list[tuple[str, bool, str]] = []
@@ -118,6 +123,37 @@ def run_workflow(base: str, name: str, client_id: str) -> tuple[bool, dict, str]
     return False, {}, f"still running after {EXECUTE_TIMEOUT}s"
 
 
+async def run_and_watch(base: str, name: str, client_id: str) -> list[dict]:
+    """Run a workflow with a websocket open, and return everything the UI was told.
+
+    A blocked node reports itself over the websocket only -- `execution_block_cb`
+    calls `server.send_sync("execution_error", ...)` and the prompt still ends
+    "success", so neither /history nor the server log records it. Polling
+    /history therefore cannot tell an instructive stop from nothing happening at
+    all, which is exactly the distinction this criterion is about.
+    """
+    import aiohttp
+
+    payload = json.loads((EXT_ROOT / "workflows" / "api" / f"{name}.json").read_text())
+    events: list[dict] = []
+    async with aiohttp.ClientSession() as session:
+        async with session.ws_connect(f"{base}/ws?clientId={client_id}") as ws:
+            await session.post(f"{base}/prompt", json={"prompt": payload, "client_id": client_id})
+            deadline = time.time() + EXECUTE_TIMEOUT
+            while time.time() < deadline:
+                try:
+                    message = await asyncio.wait_for(ws.receive(), timeout=30)
+                except TimeoutError:
+                    break
+                if message.type is not aiohttp.WSMsgType.TEXT:
+                    continue  # binary frames are preview images
+                event = json.loads(message.data)
+                events.append(event)
+                if event.get("type") in ("execution_success", "execution_interrupted"):
+                    break
+    return events
+
+
 def fetch_images(base: str, entry: dict, stem: str) -> int:
     """Pull every preview image the run produced, so the result can be eyeballed."""
     OUT.mkdir(parents=True, exist_ok=True)
@@ -149,8 +185,11 @@ def main() -> int:
         missing = EXPECTED_NODES - set(info)
         types_ok = (
             info.get("TFGenerate", {}).get("output") == ["TF_LEVELS"]
-            and info.get("TFRegionMap", {}).get("output") == ["TF_REGIONS", "IMAGE", "INT"]
+            and info.get("TFRegionMap", {}).get("output") == ["TF_REGIONS", "IMAGE", "INT", "INT"]
             and "TF_PIPELINE" in json.dumps(info.get("TFGenerate", {}).get("input", {}))
+            # the pipeline socket must survive as an optional override, or a
+            # trajectory from TF Load Levels can never be decoded
+            and "pipeline" in info.get("TFDecode", {}).get("input", {}).get("optional", {})
         )
         check(
             "startup",
@@ -186,16 +225,32 @@ def main() -> int:
             f"{len(edited_files)} distinct preview images from the edit workflow",
         )
 
-        # --- 4. validate the painter workflow --------------------------------
-        payload = json.loads(
-            (EXT_ROOT / "workflows" / "api" / "03-feature-edit-painter.json").read_text()
-        )
-        response = requests.post(f"{base}/prompt", json={"prompt": payload, "client_id": client_id})
+        # --- 4. the painter workflow's first two runs ------------------------
+        # Run it twice. The bug this replaced showed an error dialog on the
+        # first run and nothing on the second, because the second found the node
+        # cached -- so a single run cannot tell whether it is fixed.
+        for attempt in (1, 2):
+            events = asyncio.run(run_and_watch(base, "03-feature-edit-painter", client_id))
+            errors = [e["data"] for e in events if e.get("type") == "execution_error"]
+            check(
+                f"03-feature-edit-painter, run {attempt}: stops without an error dialog",
+                not errors,
+                "blocked quietly at TF Tokens From Mask"
+                if not errors else f"raised {json.dumps(errors)[:400]}",
+            )
+
+        _, entry, _ = run_workflow(base, "03-feature-edit-painter", client_id)
+        said = json.dumps(entry.get("outputs", {}))
         check(
-            "validate 03-feature-edit-painter",
-            response.ok,
-            "accepted (it stops at the empty selection, by design)"
-            if response.ok else response.text[:400],
+            "and it says why, in the node rather than a modal",
+            "Nothing painted yet" in said,
+            "TF Tokens From Mask carries the instruction as its own output text"
+            if "Nothing painted yet" in said else f"no notice in {said[:400]}",
+        )
+        check(
+            "and its first run still produced the canvas to paint on",
+            fetch_images(base, entry, "03-feature-edit-painter") > 0,
+            "TF Level Canvas previewed before the graph stopped",
         )
     finally:
         proc.terminate()

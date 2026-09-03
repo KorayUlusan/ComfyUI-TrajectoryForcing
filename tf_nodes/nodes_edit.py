@@ -22,10 +22,11 @@ from . import tokens
 from .sockets import (
     CATEGORY,
     TFLevelsSocket,
-    TFPipelineSocket,
     TFRegionsSocket,
     TFTokensSocket,
     level_input,
+    pipeline_input,
+    resolve_pipeline,
     seed_input,
 )
 
@@ -78,12 +79,18 @@ class TFFeatureEdit(io.ComfyNode):
                 source_level, source_levels=None) -> io.NodeOutput:
         index = levels.clamp(level)
         target_tokens.check_grid(levels.grid, "target_tokens")
+        # Every level shares a token grid, so a selection snapped to another
+        # level's regions fits perfectly and means something else entirely.
+        # Shape Edit has always caught this; without the same check here the
+        # edit lands on the wrong region and nothing says so.
+        target_tokens.check_level(index, "target_tokens")
         target_tokens.require_nonempty("target_tokens")
 
         source_stack = source_levels if source_levels is not None else levels
         source_tokens.check_grid(source_stack.grid, "source_tokens")
-        source_tokens.require_nonempty("source_tokens")
         src_index = source_stack.clamp(source_level)
+        source_tokens.check_level(src_index, "source_tokens")
+        source_tokens.require_nonempty("source_tokens")
 
         feature = tokens.source_feature(source_stack.level(src_index), source_tokens, source_mode)
         canvas = tokens.write_feature(levels.level(index), target_tokens, feature, strength)
@@ -133,8 +140,10 @@ class TFShapeEdit(io.ComfyNode):
     def execute(cls, levels, level, regions, boundary_tokens, receiving_tokens, strength) -> io.NodeOutput:
         index = levels.clamp(level)
         boundary_tokens.check_grid(levels.grid, "boundary_tokens")
+        boundary_tokens.check_level(index, "boundary_tokens")
         boundary_tokens.require_nonempty("boundary_tokens")
         receiving_tokens.check_grid(levels.grid, "receiving_tokens")
+        receiving_tokens.check_level(index, "receiving_tokens")
         receiving_tokens.require_nonempty("receiving_tokens")
         if regions.ids.shape != levels.grid:
             raise ValueError(
@@ -182,10 +191,9 @@ class TFResumeFromLevel(io.ComfyNode):
                 "index, so an edit only ever propagates upward."
             ),
             inputs=[
-                TFPipelineSocket.Input("pipeline"),
                 TFLevelsSocket.Input("levels"),
-                level_input(tooltip="l*. Defaults to the level the upstream edit touched when "
-                                    "'follow_edit' is on."),
+                level_input(tooltip="l*. IGNORED when 'follow_edit' is on, which takes the "
+                                    "level from the upstream edit instead."),
                 io.Boolean.Input(
                     "follow_edit", default=True,
                     tooltip="Resume from whichever level the upstream edit node wrote to, ignoring "
@@ -197,12 +205,14 @@ class TFResumeFromLevel(io.ComfyNode):
                             "trajectory's own class, which is what an edit normally wants.",
                 ),
                 seed_input(),
+                pipeline_input(),
             ],
             outputs=[TFLevelsSocket.Output("levels"), io.String.Output("info")],
         )
 
     @classmethod
-    def execute(cls, pipeline, levels, level, follow_edit, class_id, seed) -> io.NodeOutput:
+    def execute(cls, levels, level, follow_edit, class_id, seed, pipeline=None) -> io.NodeOutput:
+        pipeline = resolve_pipeline(pipeline, levels, "TF Resume From Level")
         start = level
         if follow_edit:
             if levels.dirty_level is None:
@@ -237,5 +247,6 @@ class TFResumeFromLevel(io.ComfyNode):
             seed=int(seed),
             history=levels.history + (note,),
             dirty_level=still_dirty,
+            pipeline=pipeline,
         )
         return io.NodeOutput(out, note)

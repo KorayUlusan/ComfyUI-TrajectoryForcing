@@ -1,5 +1,5 @@
 {
-  "1": {
+  "2": {
     "class_type": "TFLoadPipeline",
     "inputs": {
       "checkpoint": "auto (download TF_L_edit)",
@@ -10,39 +10,39 @@
       "title": "TF Load Pipeline"
     }
   },
-  "2": {
+  "3": {
     "class_type": "TFGenerate",
     "inputs": {
       "pipeline": [
-        "1",
+        "2",
         0
       ],
       "class_id": 213,
       "seed": 592
     },
     "_meta": {
-      "title": "target"
+      "title": "target \u2014 the image being edited"
     }
   },
-  "3": {
+  "4": {
     "class_type": "TFGenerate",
     "inputs": {
       "pipeline": [
-        "1",
+        "2",
         0
       ],
       "class_id": 207,
       "seed": 592
     },
     "_meta": {
-      "title": "source"
+      "title": "source \u2014 where the new feature comes from"
     }
   },
-  "4": {
+  "5": {
     "class_type": "TFRegionMap",
     "inputs": {
       "levels": [
-        "2",
+        "3",
         0
       ],
       "level": 2,
@@ -53,56 +53,59 @@
       "title": "TF Region Map"
     }
   },
-  "5": {
+  "6": {
     "class_type": "TFTokensFromCoords",
     "inputs": {
       "coords": "7,7",
       "levels": [
-        "2",
+        "3",
         0
       ],
       "regions": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "target region \u2014 WHERE the edit lands"
+    }
+  },
+  "7": {
+    "class_type": "TFTokensFromCoords",
+    "inputs": {
+      "coords": "6,6:9 7,6:9",
+      "levels": [
         "4",
         0
       ]
     },
     "_meta": {
-      "title": "target region"
+      "title": "source tokens \u2014 WHAT gets written there"
     }
   },
-  "6": {
-    "class_type": "TFTokensFromCoords",
-    "inputs": {
-      "coords": "6,6:9 7,6:9",
-      "levels": [
-        "3",
-        0
-      ]
-    },
-    "_meta": {
-      "title": "source tokens"
-    }
-  },
-  "7": {
+  "8": {
     "class_type": "TFFeatureEdit",
     "inputs": {
       "levels": [
-        "2",
+        "3",
         0
       ],
-      "level": 2,
-      "target_tokens": [
+      "level": [
         "5",
+        3
+      ],
+      "target_tokens": [
+        "6",
         0
       ],
       "source_tokens": [
-        "6",
+        "7",
         0
       ],
       "source_mode": "region mean",
       "strength": 1.0,
       "source_levels": [
-        "3",
+        "4",
         0
       ],
       "source_level": 2
@@ -111,15 +114,11 @@
       "title": "TF Feature Edit"
     }
   },
-  "8": {
+  "9": {
     "class_type": "TFResumeFromLevel",
     "inputs": {
-      "pipeline": [
-        "1",
-        0
-      ],
       "levels": [
-        "7",
+        "8",
         0
       ],
       "level": 2,
@@ -131,34 +130,11 @@
       "title": "TF Resume From Level"
     }
   },
-  "9": {
-    "class_type": "TFDecode",
-    "inputs": {
-      "pipeline": [
-        "1",
-        0
-      ],
-      "levels": [
-        "2",
-        0
-      ],
-      "which": "final level only",
-      "level": 2,
-      "label_levels": true
-    },
-    "_meta": {
-      "title": "before"
-    }
-  },
   "10": {
     "class_type": "TFDecode",
     "inputs": {
-      "pipeline": [
-        "1",
-        0
-      ],
       "levels": [
-        "8",
+        "9",
         0
       ],
       "which": "all levels",
@@ -170,31 +146,18 @@
     }
   },
   "11": {
-    "class_type": "TFLevelCanvas",
+    "class_type": "TFDecode",
     "inputs": {
-      "pipeline": [
-        "1",
-        0
-      ],
       "levels": [
-        "2",
+        "3",
         0
       ],
+      "which": "final level only",
       "level": 2,
-      "view": "latent PCA",
-      "draw_grid": true,
-      "size": 512,
-      "regions": [
-        "4",
-        0
-      ],
-      "highlight": [
-        "5",
-        0
-      ]
+      "label_levels": true
     },
     "_meta": {
-      "title": "TF Level Canvas"
+      "title": "before"
     }
   },
   "12": {
@@ -206,22 +169,10 @@
       ]
     },
     "_meta": {
-      "title": "edited, all levels"
+      "title": "EDITED \u2014 all four levels"
     }
   },
   "13": {
-    "class_type": "PreviewImage",
-    "inputs": {
-      "images": [
-        "9",
-        0
-      ]
-    },
-    "_meta": {
-      "title": "unedited final"
-    }
-  },
-  "14": {
     "class_type": "PreviewImage",
     "inputs": {
       "images": [
@@ -230,7 +181,77 @@
       ]
     },
     "_meta": {
-      "title": "what is selected"
+      "title": "UNEDITED \u2014 for comparison"
+    }
+  },
+  "14": {
+    "class_type": "TFLevelCanvas",
+    "inputs": {
+      "levels": [
+        "3",
+        0
+      ],
+      "level": [
+        "5",
+        3
+      ],
+      "view": "latent PCA",
+      "draw_grid": true,
+      "label_coords": true,
+      "size": 512,
+      "regions": [
+        "5",
+        0
+      ],
+      "highlight": [
+        "6",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "the level you edited, with the selection on it"
+    }
+  },
+  "15": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "14",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "what was selected"
+    }
+  },
+  "16": {
+    "class_type": "TFCompareLevels",
+    "inputs": {
+      "before": [
+        "3",
+        0
+      ],
+      "after": [
+        "9",
+        0
+      ],
+      "size": 512,
+      "decode_difference": false
+    },
+    "_meta": {
+      "title": "TF Compare Levels"
+    }
+  },
+  "17": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "16",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "where it changed, per level"
     }
   }
 }
