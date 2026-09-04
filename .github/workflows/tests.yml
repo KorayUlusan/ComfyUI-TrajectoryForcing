@@ -48,14 +48,25 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      # CPU wheels: the tests exercise schemas, edit maths and drawing, none of
-      # which touches a device. JAX is not installed at all -- `tf_nodes.pipeline`
-      # imports it lazily inside functions, so nothing the suite reaches needs it.
+      # CPU wheels throughout: the tests exercise schemas, edit maths and drawing,
+      # none of which touches a device.
+      #
+      # `jax` is here for one reason. `tests/test_tf_import.py` covers the
+      # namespace swap -- the load-bearing trick of this extension, and the
+      # sharpest edge in CONTRIBUTING -- by importing TrajectoryForcing's
+      # `utils.vis_util`, whose first line is `import jax.numpy`. Without it those
+      # five tests fail, and skipping them would leave CI not covering the one
+      # thing hardest to get right. The CPU wheel is enough; nothing here needs
+      # CUDA, and no `jax[cuda12]` means no fight with torch over CUDA libraries.
+      #
+      # The rest of the JAX stack (flax, orbax, ml_collections) is deliberately
+      # absent -- the suite never loads a real model. `check_runtime_deps` is
+      # tested against stubbed dependency lists, so it does not care either way.
       - name: Install
         run: |
           pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
           pip install -r ComfyUI/requirements.txt
-          pip install pytest
+          pip install jax pytest
 
       # `tests/conftest.py` finds ComfyUI by walking up from the extension, which
       # resolves in a normal side-by-side checkout and lands one level too high
