@@ -169,3 +169,66 @@ class TestTheReportIsActionable:
         text = doctor.format_findings(doctor.run())
         for _, label, _ in doctor.run().rows:
             assert label in text
+
+
+def fake_torch_without_a_gpu(monkeypatch):
+    """A torch that imports and sees no device.
+
+    A bare class is not enough: `_gpu` probes with `find_spec` first, which
+    raises ValueError on an object with no `__spec__`.
+    """
+    import importlib.util
+    import sys
+    import types
+
+    module = types.ModuleType("torch")
+    module.__spec__ = importlib.util.spec_from_loader("torch", loader=None)
+    module.cuda = types.SimpleNamespace(is_available=lambda: False)
+    monkeypatch.setitem(sys.modules, "torch", module)
+
+
+class TestExpectedStatesAreNotFailures:
+    """A doctor that cries FAIL on a correct install gets ignored.
+
+    Both of these were reported as failures on a machine that had just been
+    installed exactly as the README says. The person reading it had to reason
+    their way past two FAILs to conclude nothing was wrong, which is the
+    opposite of what this tool is for.
+    """
+
+    def test_an_unfetched_checkout_is_a_note_not_a_failure(self, monkeypatch, tmp_path):
+        """ComfyUI fetches it at startup, so before the first start there is
+        legitimately none."""
+        from tf_nodes import locate
+
+        monkeypatch.setattr(locate, "EXT_ROOT", tmp_path / "ext")
+        monkeypatch.setattr(locate, "TF_REPO_FETCH_DIR", tmp_path / "ext" / "TrajectoryForcing")
+        monkeypatch.setattr(locate, "_TF_REPO", None)
+        monkeypatch.delenv("TF_REPO", raising=False)
+
+        status, detail = doctor._checkout()
+        assert status == doctor.WARN, f"got {status}: {detail}"
+        assert "startup" in detail
+
+    def test_no_gpu_on_a_slurm_login_node_is_a_note(self, monkeypatch):
+        """Preparing an install on a login node and running it in a job is the
+        documented route, so a missing GPU there is expected."""
+        import shutil as _shutil
+
+        def which(name):
+            return "/usr/bin/sbatch" if name == "sbatch" else _shutil.which(name)
+
+        monkeypatch.setattr(doctor.shutil, "which", which)
+
+        fake_torch_without_a_gpu(monkeypatch)
+        status, detail = doctor._gpu()
+        assert status == doctor.WARN
+        assert "login node" in detail
+
+    def test_no_gpu_without_slurm_is_still_a_failure(self, monkeypatch):
+        """On an ordinary machine a missing GPU means the nodes cannot run."""
+        monkeypatch.setattr(doctor.shutil, "which", lambda n: None)
+
+        fake_torch_without_a_gpu(monkeypatch)
+        status, _ = doctor._gpu()
+        assert status == doctor.BAD

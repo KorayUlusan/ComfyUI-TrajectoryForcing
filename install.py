@@ -44,6 +44,14 @@ import re
 import subprocess
 import sys
 from importlib.util import find_spec
+from pathlib import Path
+
+#: This file's own directory. The instructions below quote it in full rather
+#: than as `cd custom_nodes/...`, because a relative path is only useful from
+#: the ComfyUI root and the reader is rarely there: ComfyUI-Manager runs this
+#: from wherever the server was launched, and the message is often read hours
+#: later out of a scrollback.
+HERE = Path(__file__).resolve().parent
 
 # The torch this extension is known to work with. Deliberately narrow: 2.8.0 is
 # the version the GPU comparison above actually ran, and CUDA 12 is what jax
@@ -223,7 +231,7 @@ def main() -> int:
             "  of versions -- so rather than move the torch every other node here",
             "  depends on, this extension builds its own environment:",
             "",
-            "      cd custom_nodes/comfyui-trajectoryforcing",
+            f"      cd {HERE}",
             "      bash env/setup.sh",
             "",
             "  then start ComfyUI from the venv that builds. env/requirements.txt",
@@ -267,7 +275,7 @@ def main() -> int:
             "  The nodes are installed but will not run yet. Nothing was removed, so",
             "  this ComfyUI is no worse off. The reliable route is a dedicated venv:",
             "",
-            "      cd custom_nodes/comfyui-trajectoryforcing",
+            f"      cd {HERE}",
             "      bash env/setup.sh",
             "=" * 72,
             "",

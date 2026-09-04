@@ -66,6 +66,12 @@ import comfy.quant_ops  # noqa: F401
 print("comfy.quant_ops   imports cleanly")
 PY
 
+# install.py leaves this when it declines to touch a ComfyUI venv. Building the
+# dedicated venv is exactly what it asked for, so the note is now stale -- and a
+# stale one is worse than none, since the next ComfyUI start repeats advice that
+# has already been followed.
+rm -f "$EXT_DIR/SETUP-REQUIRED.txt"
+
 echo
 echo "Done: $VENV"
 echo "Next: ./run_comfyui.sh   (or sbatch slurm/comfyui.sbatch on a GPU node)"

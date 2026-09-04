@@ -97,8 +97,12 @@ def _gpu() -> tuple[str, str]:
         # Expected, and fine, on a cluster login node: the install is being
         # prepared here and run somewhere else. Say so, or this reads as a
         # broken install to someone doing exactly the right thing.
-        where = " (normal on a Slurm login node -- run this again inside the job)"
-        return BAD, "torch cannot see a GPU" + (where if shutil.which("sbatch") else "")
+        if shutil.which("sbatch"):
+            # Preparing an install on a login node and running it in a job is
+            # the documented route here, so a missing GPU is expected rather
+            # than wrong. A note, so the exit code still says "install is fine".
+            return WARN, "no GPU here, which is normal on a Slurm login node -- check again inside the job"
+        return BAD, "torch cannot see a GPU"
     name = torch.cuda.get_device_name(0)
     total = torch.cuda.get_device_properties(0).total_memory / 1024**3
     status = OK if total >= 7.5 else WARN
@@ -133,7 +137,15 @@ def _checkout() -> tuple[str, str]:
     # moment. Via the argument, never by setting TF_NO_AUTO_FETCH here -- that
     # is process-wide, and doing it from this probe disabled fetching for every
     # test that ran afterwards, which is how CI went red.
-    path = tf_repo(allow_fetch=False)
+    try:
+        path = tf_repo(allow_fetch=False)
+    except FileNotFoundError:
+        # Normal, and common: the fetch happens when ComfyUI first loads the
+        # extension, so a fresh install legitimately has none yet. Reporting it
+        # as a failure taught readers to discount the whole report -- an agent
+        # following the README hit exactly this and had to reason its way past
+        # two FAILs on a correct install.
+        return WARN, "not fetched yet; ComfyUI fetches it at startup, pinned"
     head = "unknown"
     git = shutil.which("git")
     if git:
@@ -213,14 +225,16 @@ def run(devices: bool = False) -> Findings:
     f = Findings()
     f.check("python", _python, "These nodes are built and tested on 3.11.")
     f.check("torch", _torch, SETUP_FIX)
-    f.check("gpu", _gpu, "Check nvidia-smi, and that ComfyUI runs from the right venv.")
+    f.check("gpu", _gpu, "If you expect a GPU here: check nvidia-smi, and that "
+            "ComfyUI runs from the venv env/setup.sh built.")
     f.check("jax stack", _jax_stack, SETUP_FIX)
     if devices:
         f.check("jax devices", _jax_devices, SETUP_FIX)
     f.check(
         "TrajectoryForcing",
         _checkout,
-        "Set TF_REPO to a checkout holding pmf.py and editing_env/, or let it fetch one.",
+        "Nothing to do unless you want a specific checkout: set TF_REPO to one "
+        "holding pmf.py and editing_env/.",
     )
     f.check("weights", _weights, "Absent weights download on first run; allow ~3.5 GB and time.")
     f.check("disk", _disk, "First run downloads ~3.5 GB of weights.")
