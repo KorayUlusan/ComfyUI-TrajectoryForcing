@@ -4,7 +4,7 @@
 scripts/gpu_smoke.py calls the nodes directly, which leaves two things untested:
 whether ComfyUI's execution engine is happy with the custom socket types (it
 validates every link against /object_info before running anything), and whether
-the generated workflows in workflows/api/ are actually executable rather than
+the generated workflows in example_workflows/api/ are actually executable rather than
 merely well-formed JSON. Both only fail once a server is running, so this starts
 one.
 
@@ -126,7 +126,7 @@ def wait_for(url: str, proc: subprocess.Popen, timeout: int) -> dict | None:
 
 
 def run_workflow(base: str, name: str, client_id: str) -> tuple[bool, dict, str]:
-    payload = json.loads((EXT_ROOT / "workflows" / "api" / f"{name}.json").read_text())
+    payload = json.loads((EXT_ROOT / "example_workflows" / "api" / f"{name}.json").read_text())
     response = requests.post(f"{base}/prompt", json={"prompt": payload, "client_id": client_id})
     if not response.ok:
         return False, {}, f"validation rejected it: {response.text[:600]}"
@@ -157,7 +157,7 @@ async def run_and_watch(base: str, name: str, client_id: str) -> list[dict]:
     """
     import aiohttp
 
-    payload = json.loads((EXT_ROOT / "workflows" / "api" / f"{name}.json").read_text())
+    payload = json.loads((EXT_ROOT / "example_workflows" / "api" / f"{name}.json").read_text())
     events: list[dict] = []
     async with aiohttp.ClientSession() as session:
         async with session.ws_connect(f"{base}/ws?clientId={client_id}") as ws:

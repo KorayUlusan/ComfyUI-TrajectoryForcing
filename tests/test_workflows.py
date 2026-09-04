@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-WORKFLOWS = sorted((Path(__file__).resolve().parent.parent / "workflows").glob("*.json"))
+WORKFLOWS = sorted((Path(__file__).resolve().parent.parent / "example_workflows").glob("*.json"))
 
 
 def boxes_overlap(a, b) -> bool:

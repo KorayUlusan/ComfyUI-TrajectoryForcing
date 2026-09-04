@@ -215,7 +215,7 @@ cat <<EOF
 
            http://localhost:${PORT}
 
-    4. Load a workflow from workflows/ and press Run. The first
+    4. Load a workflow from example_workflows/ and press Run. The first
        TF Load Pipeline takes 1-2 minutes to warm up; after that it is instant.
 
   Press Ctrl-C here at any time to cancel the job and free the GPU.

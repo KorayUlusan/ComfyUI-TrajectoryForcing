@@ -91,7 +91,7 @@ async def main() -> int:
 
             client_id = str(uuid.uuid4())
             payload = json.loads(
-                (EXT_ROOT / "workflows" / "api" / "01-generate-and-decode.json").read_text())
+                (EXT_ROOT / "example_workflows" / "api" / "01-generate-and-decode.json").read_text())
             events: list[dict] = []
             finished = False
             async with session.ws_connect(f"{BASE}/ws?clientId={client_id}",

@@ -18,9 +18,15 @@ Five diagrams, in reading order. Load one with **Workflow → Open**, or drag th
 All five are generated from the live node definitions by
 `scripts/make_workflows.py`, so they cannot drift from what the nodes accept.
 
+Each `.json` has a `.jpg` of the same name beside it. That is what ComfyUI shows
+as the card image when it lists these under **Workflow → Browse Templates**, and
+it is the same picture used below.
+
 ---
 
 ## 01 · generate and decode
+
+![workflow 01 on the ComfyUI canvas: load, sample, and two preview strips](01-generate-and-decode.jpg)
 
 Sample one trajectory and look at all four levels, decoded and as the raw token
 grid.
@@ -42,6 +48,8 @@ region boundaries are far easier to see there than in the decoded image.
 ---
 
 ## 02 · feature edit (coords)
+
+![workflow 02 on the canvas: two trajectories, a region map, the edit, and a comparison](02-feature-edit-coords.jpg)
 
 Take the average feature of a patch of one image, write it into a region of
 another, then re-sample the finer levels from there.
@@ -83,6 +91,8 @@ interesting kind of wrong.
 
 ## 03 · feature edit (painter)
 
+![workflow 03 on the canvas: the Painter node and the two-run stop](03-feature-edit-painter.jpg)
+
 The same edit, with the region picked by brush.
 
 It takes two runs by design, because the graph has to run once to produce the
@@ -115,6 +125,8 @@ useful for a deliberately ragged selection.
 
 ## 04 · shape edit
 
+![workflow 04 on the canvas: a region map and the two token selections](04-shape-edit.jpg)
+
 Change where a region ends rather than what it contains. Tokens are handed to a
 neighbour and take on the receiving region's average feature, so the boundary
 moves and no new content is invented. This is the paper's `R_a → R_b`.
@@ -138,6 +150,8 @@ therefore what a shape edit can move.
 ---
 
 ## 05 · sweep seeds
+
+![workflow 05 on the canvas: one edit swept across four seeds, with the contact sheet](05-sweep-seeds.jpg)
 
 Workflow 02's edit, four times over, to answer whether it was the edit or the
 seed.

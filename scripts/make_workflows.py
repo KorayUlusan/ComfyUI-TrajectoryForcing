@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the example workflows in workflows/ from the live node schemas.
+"""Generate the example workflows in example_workflows/ from the live node schemas.
 
 Hand-written workflow JSON goes stale the moment a widget is added or reordered,
 and the failure is silent: LiteGraph stores widget values positionally, so an
@@ -13,7 +13,7 @@ Emits two files per workflow:
 
   workflows/<name>.json      LiteGraph format -- what "Open" in the ComfyUI menu
                              expects, and what a user actually loads.
-  workflows/api/<name>.json  API format -- what POST /prompt expects. This is
+  example_workflows/api/<name>.json  API format -- what POST /prompt expects. This is
                              the one scripts/server_smoke.py executes, so it is
                              the format that gets tested rather than eyeballed.
 """
@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 EXT_ROOT = Path(__file__).resolve().parent.parent
-WORKFLOWS = EXT_ROOT / "workflows"
+WORKFLOWS = EXT_ROOT / "example_workflows"
 
 
 def comfy_root() -> Path:

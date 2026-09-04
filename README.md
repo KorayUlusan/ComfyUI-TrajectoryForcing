@@ -62,7 +62,7 @@ is a node graph.
 ### Let a coding agent do it
 
 Paste this into Claude Code, Codex, Gemini CLI or whatever you use. It covers
-the three things that are easy to get wrong and expensive to undo.
+the things that are easy to get wrong here and expensive to undo.
 
 ```text
 Install the ComfyUI node pack "Trajectory Forcing" on this machine.
@@ -221,45 +221,8 @@ Manager → **Update**, or:
 comfy node update --mode remote comfyui-trajectoryforcing
 ```
 
-Two things an update deliberately does not do for you, both because they would
-mean touching things you may have set up yourself:
-
-**The pinned TrajectoryForcing commit.** `tf_repo()` returns the first checkout
-it finds and never compares it to `TF_REPO_COMMIT`, so if a release moves the
-pin, your existing checkout stays where it is. That is on purpose — silently
-re-fetching model code under someone is worse than leaving it — but it means
-nothing tells you unless you ask:
-
-```bash
-python -m tf_nodes.doctor        # the TrajectoryForcing row names both commits
-```
-
-To take the new pin, delete the checkout inside the extension and restart
-ComfyUI, which re-fetches it:
-
-```bash
-rm -rf TrajectoryForcing         # only if it was auto-fetched; not a $TF_REPO of your own
-```
-
-**The venv.** `env/setup.sh` refuses to touch one that already exists, because a
-half-resolved mix of the JAX and torch pins is far harder to diagnose than a
-rebuild. If `env/requirements.txt` changed, remove the venv and re-run it.
-
-Your `.env` and the auto-fetched `TrajectoryForcing/` both live inside the
-extension directory, so keep a copy of `.env` if you are about to remove and
-reinstall rather than update in place.
-
-To see whether there is anything to update at all — the installed version
-against the newest published one:
-
-```bash
-grep '^version' pyproject.toml
-curl -s https://api.comfy.org/nodes/comfyui-trajectoryforcing/versions \
-  | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['version'])"
-```
-
 <details>
-<summary>Let a coding agent do it</summary>
+<summary>Or: Let a coding agent do it</summary>
 
 ```text
 Update the ComfyUI node pack "Trajectory Forcing" on this machine, if there is
@@ -295,12 +258,49 @@ weights.
 ```
 </details>
 
+An update leaves two things alone, because changing either would mean touching
+something you set up yourself.
+
+**The pinned TrajectoryForcing commit.** `tf_repo()` returns the first checkout
+it finds and never compares it to `TF_REPO_COMMIT`, so if a release moves the
+pin, your existing checkout stays where it is. Re-fetching model code under
+someone without asking would be worse. Nothing announces the difference either
+way, so ask:
+
+```bash
+python -m tf_nodes.doctor        # the TrajectoryForcing row names both commits
+```
+
+To take the new pin, delete the checkout inside the extension and restart
+ComfyUI, which re-fetches it:
+
+```bash
+rm -rf TrajectoryForcing         # only if it was auto-fetched; not a $TF_REPO of your own
+```
+
+**The venv.** `env/setup.sh` refuses to touch one that already exists, because a
+half-resolved mix of the JAX and torch pins is far harder to diagnose than a
+rebuild. If `env/requirements.txt` changed, remove the venv and re-run it.
+
+Your `.env` and the auto-fetched `TrajectoryForcing/` both live inside the
+extension directory, so keep a copy of `.env` if you are about to remove and
+reinstall rather than update in place.
+
+To find out whether there is anything to update, compare the installed version
+against the newest published one:
+
+```bash
+grep '^version' pyproject.toml
+curl -s https://api.comfy.org/nodes/comfyui-trajectoryforcing/versions \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['version'])"
+```
+
 ## Configuration: the `.env` file
 
 Nothing has to be set if ComfyUI, the venv and this extension are where
-`env/setup.sh` puts them. Everything else — where your ComfyUI lives, which venv
-to run, which Slurm partition to ask for, where the weights already are — is one
-gitignored file that every script in this repo sources:
+`env/setup.sh` puts them. Everything else lives in one gitignored file that every
+script here sources: where your ComfyUI is, which venv to run, which Slurm
+partition to ask for, where the weights already are.
 
 ```bash
 cp .env.example .env
@@ -346,9 +346,10 @@ It happens at ComfyUI startup rather than first generate, because the loader's
 config dropdown and the ImageNet class list are built from the checkout while node
 schemas are defined. Set `TF_NO_AUTO_FETCH=1` to turn it off.
 
-If that fetch cannot happen — no network, no `git`, a half-finished clone — the
-nodes still register and the reason is printed to ComfyUI's log. Only running one
-fails, with the same message. A missing checkout is not a broken install.
+If the fetch cannot happen, whether from no network, no `git`, or a clone that
+got half way, the nodes still register and the reason goes to ComfyUI's log. Only
+running one fails, with the same message. A missing checkout is not a broken
+install.
 
 Weights, both resolved on first use:
 
@@ -361,7 +362,7 @@ Weights, both resolved on first use:
 ## Workflows
 
 Five examples, each self-documenting on the canvas. Walkthrough:
-[**workflows/README.md**](workflows/README.md).
+[**example_workflows/README.md**](example_workflows/README.md).
 
 | | what | runs as-is |
 |---|---|---|
@@ -500,9 +501,10 @@ python -m tf_nodes.doctor
 
 It reports python, torch and its CUDA major, the GPU, the JAX stack, where
 TrajectoryForcing was found and whether it matches the pin, which weights exist,
-free disk, and any note the installer left — each with the one command that
-fixes it. Run it from the extension directory with the same interpreter ComfyUI
-uses, and paste the output into a bug report rather than a screenshot.
+free disk, and any note the installer left. Every row that is not `ok` carries
+the one command that fixes it. Run it from the extension directory with the same
+interpreter ComfyUI uses, and paste the output into a bug report rather than a
+screenshot.
 
 It will not import JAX or download anything while answering. Add `--devices` to
 have JAX enumerate the GPUs, but not inside a running ComfyUI: that initialises
@@ -532,7 +534,7 @@ Upgrade pip in whichever venv is doing the install, then retry:
 
 `env/setup.sh` already does this before it installs anything, so the venv that
 runs the model is unaffected. It bites the ComfyUI workspace venv, which
-`comfy install` creates and immediately installs into — which is why the route
+`comfy install` creates and immediately installs into. That is why the route
 above passes `--skip-torch-or-directml` and keeps torch out of it entirely.
 </details>
 

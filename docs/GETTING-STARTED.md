@@ -60,8 +60,8 @@ the rest for model weights that download on first use.
 
 ## Install
 
-Everything goes in one folder. Pick where, and nothing is written outside it —
-uninstalling later is deleting that folder.
+Everything goes in one folder. Pick where, and nothing is written outside it.
+Uninstalling later means deleting that folder.
 
 ```bash
 export TF_HOME="$HOME/trajectory-forcing"    # anywhere you like
@@ -106,7 +106,7 @@ Anything else: [README → Troubleshooting](../README.md#troubleshooting).
 **1. Load a diagram.** Use **Workflow → Open** at the top left, then pick:
 
 ```
-$TF_HOME/ComfyUI/custom_nodes/comfyui-trajectoryforcing/workflows/01-generate-and-decode.json
+$TF_HOME/ComfyUI/custom_nodes/comfyui-trajectoryforcing/example_workflows/01-generate-and-decode.json
 ```
 
 **2. Press Run**, at the bottom of the screen. The first run loads the model and
@@ -126,7 +126,7 @@ again.
 
 ## Your first edit
 
-Open `workflows/02-feature-edit-coords.json` and press Run.
+Open `example_workflows/02-feature-edit-coords.json` and press Run.
 
 It generates two images, a target being edited and a source the new content comes
 from. It takes a patch of the source, writes it into a region of the target at
@@ -152,7 +152,7 @@ Then try:
 - the two class ids, to mix different things.
 
 For a free-hand region instead of grid cells,
-`workflows/03-feature-edit-painter.json` gives you a brush. It needs two runs, and
+`example_workflows/03-feature-edit-painter.json` gives you a brush. It needs two runs, and
 that is deliberate.
 
 ---
@@ -164,18 +164,18 @@ an edited canvas is still generating, so it lands somewhere slightly different
 every time. One before-and-after pair cannot tell you which part of the difference
 you caused.
 
-Open `workflows/05-sweep-seeds.json` and press Run. It makes the same edit with
+Open `example_workflows/05-sweep-seeds.json` and press Run. It makes the same edit with
 four different seeds, each against an unedited run of that same seed, and reports
 how far apart the four results are. A small spread means the edit decided the
 picture. A large one means the seed did.
 
-Details in [workflows/README.md](../workflows/README.md#05--sweep-seeds).
+Details in [example_workflows/README.md](../example_workflows/README.md#05--sweep-seeds).
 
 ---
 
 ## Where to go next
 
-- [**workflows/README.md**](../workflows/README.md) for what each diagram does and what to change.
+- [**example_workflows/README.md**](../example_workflows/README.md) for what each diagram does and what to change.
 - [**README.md**](../README.md) for every node and setting.
 - [**The paper**](https://mervekocabas.github.io/TrajectoryForcing/) for the method itself.
 

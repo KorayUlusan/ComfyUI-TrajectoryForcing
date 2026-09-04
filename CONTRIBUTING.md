@@ -320,6 +320,23 @@ Workflows are generated rather than hand-written. LiteGraph stores widget values
 positionally, so a hand-edited file loads with plausible wrong numbers rather than
 an error the moment a widget is added.
 
+The directory is called `example_workflows/` because ComfyUI looks for one of
+`example_workflows`, `example`, `examples`, `workflow`, `workflows` inside every
+custom node and serves what it finds under **Workflow -> Browse Templates**
+(`app/custom_node_manager.py`). The first name is the one it asks you to use;
+the others work but log a nudge.
+
+Each `.json` has a `.jpg` of the same name beside it, which is the card image in
+that browser. The extension is not `.png` by choice: the frontend hardcodes
+`mediaSubtype: 'jpg'` for custom node templates and requests
+`/api/workflow_templates/<pack>/<name>.jpg`, so a differently named or typed
+file is simply not found and the card renders blank. Nothing checks this, so
+when you add a workflow, add the screenshot too:
+
+```bash
+convert shot.png -resize 1600x -quality 82 -strip example_workflows/<name>.jpg
+```
+
 Name the output a link comes from, and never count to it:
 
 ```python
@@ -483,7 +500,7 @@ anyway.
 |---|---|
 | `README.md` | someone who already uses ComfyUI |
 | `docs/GETTING-STARTED.md` | someone who has never opened it |
-| `workflows/README.md` | the five example graphs |
+| `example_workflows/README.md` | the five example graphs |
 | `CONTRIBUTING.md` | you, right now |
 
 Keep numbers in one place. The VRAM table comes from `measure_resources.py`, and
