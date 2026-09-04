@@ -41,7 +41,7 @@ tf_nodes/
   locate.py             where TrajectoryForcing and the weights are
   tf_import.py          the namespace swap (read this before anything else)
   pipeline.py           the only module that touches JAX
-  health.py             startup problems, recorded rather than raised
+  health.py             startup problems, recorded and not raised
   doctor.py             `python -m tf_nodes.doctor`, the whole install in one report
   data.py               the three socket payloads
   tokens.py             region clustering + the edit primitive, pure numpy
@@ -104,7 +104,7 @@ Both were invisible locally and failed on a runner, twenty tests away from the
 cause. They now fail on the test that did it, with the reason.
 
 Nothing here drives a browser. When a report is about something only visible on
-screen, say which layer proved what rather than implying the whole path is
+screen, name the layer that proved it and do not imply the whole path is
 covered.
 
 Write exit criteria into a script's docstring before the run, not after.
@@ -114,7 +114,7 @@ trajectory bit-for-bit, or the run is void.
 <details>
 <summary>Why <code>submit.sh</code>, why <code>pytest.ini</code>, why a fourth layer</summary>
 
-`submit.sh` rather than plain `sbatch`, because `#SBATCH` lines are comments to
+`submit.sh` and not plain `sbatch`, because `#SBATCH` lines are comments to
 bash and cannot read a variable. That makes partition and QOS, the two settings
 that differ on every cluster, the one thing a `.sbatch` cannot carry. The wrapper
 reads them from `.env` and puts them on the command line, where they override the
@@ -148,8 +148,8 @@ must hold `tf_scope()`, not just the import, because the RAE decoder imports
 `utils.logging_util` lazily from functions that first run at decode time.
 
 **2. Namespace packages get `__file__ = None`.** None of TF's directories has an
-`__init__.py`, and CPython gives PEP 420 packages a null `__file__` rather than
-none at all. `inspect.getmodule` guards on `hasattr(m, "__file__")`, passes, then
+`__init__.py`, and CPython gives PEP 420 packages a null `__file__` instead of
+no attribute at all. `inspect.getmodule` guards on `hasattr(m, "__file__")`, passes, then
 dies in `getfile`. pydantic calls `getmodule` while building a model, and wandb
 builds pydantic models while TF imports it, so this crashed TF Load Pipeline
 inside a running server while the identical import succeeded in a bare script.
@@ -195,7 +195,7 @@ turns it into `NodeOutput(block_execution=None)`.
 `LevelStack.pipeline`. A trajectory remembers the pipeline that made it, so
 consumers need no wire. A trajectory from `TF Load Levels` has none, which is why
 every consumer keeps an optional socket and calls `resolve_pipeline`. Use that
-helper rather than a required socket.
+helper, not a required socket.
 
 `TokenSelection.level`. A selection remembers which level's regions it was snapped
 to. Every level shares a token grid, so a mismatched selection fits perfectly and
@@ -214,7 +214,7 @@ knobs people actually turn stay visible.
 
 ### Which spelling of "automatic"
 
-Three are in use. The choice follows the shape of the domain rather than taste:
+Three are in use. The choice follows the shape of the domain, not taste:
 
 | domain | spelling | used by |
 |---|---|---|
@@ -360,7 +360,7 @@ its `widgets_values` slot and gains an `inputs` entry naming the widget. Combo
 values are validated against the live option list, which catches a workflow that
 names something the server will reject.
 
-Layout is computed rather than typed. Nodes that display something carry a
+Layout is computed, never typed. Nodes that display something carry a
 realistic `BODY_HEIGHT`, since a `PreviewImage` is about 66px empty and 430px with
 an image, and sizing for the empty state is what put content outside its group the
 first time anyone ran a graph. Row numbers are an ordering hint. Columns are
@@ -379,11 +379,11 @@ payload, and group boxes are computed from where members actually ended up.
 exists under one condition that any change has to keep: it may never become the
 only way to do something.
 
-The grid writes into the node's own `coords` string rather than replacing it, so
+The grid writes into the node's own `coords` string instead of replacing it, so
 if the file fails to load, or ComfyUI changes an API it leans on, the text field is
 still there and typing still works. The whole `onNodeCreated` body is wrapped in a
 `try` for the same reason. That condition is the entire reason frontend code is
-acceptable here, since failure costs a convenience rather than a feature. Compare
+acceptable here, since failure costs a convenience and not a feature. Compare
 *Painter*, a Vue component that is simply unusable under the classic renderer, and
 needed a server-side detector and three paragraphs of docs.
 
@@ -392,7 +392,7 @@ narrow the gap. `tokens.format_coords` is the tested reference implementation of
 the notation the JS must reproduce byte-for-byte, with a round-trip property,
 without which the grid would silently rewrite what someone typed. And
 `server_smoke` checks that ComfyUI found `WEB_DIRECTORY` and serves the file.
-Everything past that needs someone to click it, so say that in a PR rather than
+Everything past that needs someone to click it, so say so in a PR instead of
 implying it was verified.
 
 ---
@@ -417,7 +417,7 @@ missing. Never upgrade, never downgrade, never touch torch: someone whose
 ComfyUI works before installing this must still have one afterwards. Adding JAX
 on top of torch was checked on an H100 against a JAX-first venv, both passing
 the same five criteria with no `nvidia-*` wheel moving; before widening
-`MIN_TORCH` or `CUDA_MAJOR`, run that comparison again rather than reasoning
+`MIN_TORCH` or `CUDA_MAJOR`, run that comparison again instead of reasoning
 about it. The pins are asserted against `env/requirements.txt` by
 `tests/test_install.py`, which is what stops the two drifting.
 
@@ -479,8 +479,8 @@ print(xs.min(), w-1-xs.max(), ys.min(), h-1-ys.max())   # left right top bottom
 Fork, branch, open a pull request. `pytest tests` and `ruff check .` both have to
 pass; CI runs them on every push and will not publish a release without them.
 
-If your change touches the model path -- anything under `pipeline.py`,
-`tokens.py` or the edit nodes -- say in the PR whether you ran `gpu_smoke`, and
+If your change touches the model path, meaning anything under `pipeline.py`,
+`tokens.py` or the edit nodes, say in the PR whether you ran `gpu_smoke` and
 paste the result if you did. Nobody will hold it against you if you have no GPU;
 say so and it will be run for you. What causes trouble is a change described as
 tested when only the CPU suite was.
@@ -505,6 +505,6 @@ anyway.
 
 Keep numbers in one place. The VRAM table comes from `measure_resources.py`, and
 every figure quoted anywhere should trace back to the run that produced it. When
-a result retires an earlier claim, mark the old one superseded rather than
-deleting it -- the retraction is the evidence that the criteria were fixed in
+a result retires an earlier claim, mark the old one superseded instead of
+deleting it. The retraction is the evidence that the criteria were fixed in
 advance, and it is worth more than the tidier version would be.

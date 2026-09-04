@@ -181,7 +181,7 @@ larger, it would not have been.
 | `axis` → `level (l*)` | with `0-3`, the same edit at each level. This is the sweep Sec. 4.4 is really about, since coarser edits cascade through more re-sampling. |
 | `axis` → `strength` | with `0.25,0.5,0.75,1.0`, where a blend stops being a blend |
 | `output_arm` (advanced) | which arm leaves on `levels`, for the *TF Compare Levels* at the bottom |
-| `arm_limit` (advanced) | refuses to start rather than let a mistyped `0-1000` hold the GPU |
+| `arm_limit` (advanced) | refuses to start at all if a mistyped `0-1000` would hold the GPU |
 | `decode` off (advanced) | contact sheet uses PCA tiles instead. Costs nothing, and the table is identical. |
 
 Cost is two re-samples and one decode per arm. Four arms is seconds once the model
@@ -198,8 +198,8 @@ that image or nowhere.
 `level (l*)` is the one axis that cannot hold everything fixed, because a
 selection snapped to level 2's regions is not a whole region at level 0. The node
 keeps the token set fixed, which is what "the same edit at every level" has to
-mean, and says so in the report rather than refusing. Use typed coordinates rather
-than a snapped selection if you want the token set to be exactly what you chose.
+mean, and says so in the report instead of refusing. Use typed coordinates, not a
+snapped selection, if you want the token set to be exactly what you chose.
 
 Shape edits sweep too. Wire a *TF Region Map* into `regions` and the edit becomes
 workflow 04's. `seed` and `strength` work, and `level (l*)` is refused, because a

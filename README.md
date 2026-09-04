@@ -451,7 +451,7 @@ About half of all widgets sit behind ComfyUI's advanced toggle. Turn on
 </details>
 
 <details>
-<summary><b>Sweeping</b>: what makes it an experiment rather than a batch button</summary>
+<summary><b>Sweeping</b>: what makes it an experiment and not a batch button</summary>
 
 **TF Sweep Edit** runs feature edit, resume and measure once per value of one axis
 (`seed`, `level`, `strength`), with everything else pinned, so no two arms differ
@@ -473,9 +473,9 @@ refused with that reason.
 Sweeping *l\** is the one axis that cannot hold everything fixed, because a
 selection snapped to one level's regions is not a whole region at another. The
 node keeps the token set fixed, which is what "the same edit at every level" has
-to mean, and says so in the report rather than refusing.
+to mean, and says so in the report instead of refusing.
 
-`arm_limit` (advanced) refuses to start rather than let a mistyped `0-1000` hold
+`arm_limit` (advanced) refuses to start at all if a mistyped `0-1000` would hold
 the GPU.
 </details>
 
@@ -503,8 +503,8 @@ It reports python, torch and its CUDA major, the GPU, the JAX stack, where
 TrajectoryForcing was found and whether it matches the pin, which weights exist,
 free disk, and any note the installer left. Every row that is not `ok` carries
 the one command that fixes it. Run it from the extension directory with the same
-interpreter ComfyUI uses, and paste the output into a bug report rather than a
-screenshot.
+interpreter ComfyUI uses. Paste the output into a bug report; a screenshot of it
+is much less use.
 
 It will not import JAX or download anything while answering. Add `--devices` to
 have JAX enumerate the GPUs, but not inside a running ComfyUI: that initialises
