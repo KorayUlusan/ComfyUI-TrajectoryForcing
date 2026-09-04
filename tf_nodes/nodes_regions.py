@@ -140,10 +140,13 @@ class TFRegionMap(io.ComfyNode):
                 ),
                 io.Int.Input("size", default=512, min=128, max=2048, step=64, advanced=True),
             ],
+            # No `num_regions` socket: the count is on the RegionMap the
+            # 'regions' output already carries, and it is in this node's body.
+            # 'level' stays because it drives a widget -- the edit node's own
+            # 'level' -- which is the test a scalar output has to pass.
             outputs=[
                 TFRegionsSocket.Output("regions"),
                 io.Image.Output("map"),
-                io.Int.Output("num_regions"),
                 io.Int.Output(
                     "level",
                     tooltip="The level these regions describe. Wire it into the edit node's "
@@ -160,7 +163,7 @@ class TFRegionMap(io.ComfyNode):
         picture = render.draw_ticks(picture, regions.ids.shape)
         image = render.to_image(picture)
         return io.NodeOutput(
-            regions, image, regions.num_regions, index,
+            regions, image, index,
             ui=node_preview(image=image,
                             text=f"{regions.num_regions} regions at level {index} "
                                  f"(threshold {cosine_threshold:.2f})"),
@@ -209,7 +212,6 @@ class TFTokensFromMask(io.ComfyNode):
             ],
             outputs=[
                 TFTokensSocket.Output("tokens"),
-                io.Int.Output("count"),
                 io.String.Output("info"),
             ],
         )
@@ -241,9 +243,9 @@ class TFTokensFromMask(io.ComfyNode):
             # free to say why in this node's own body.
             stop = ExecutionBlocker(None)
             reason = _nothing_painted(painted, coverage, regions, region_overlap)
-            return io.NodeOutput(stop, stop, stop, ui=node_preview(text=reason))
+            return io.NodeOutput(stop, stop, ui=node_preview(text=reason))
         info = _describe(selection)
-        return io.NodeOutput(selection, selection.count, info, ui=node_preview(text=info))
+        return io.NodeOutput(selection, info, ui=node_preview(text=info))
 
 
 class TFTokensFromCoords(io.ComfyNode):
@@ -291,7 +293,6 @@ class TFTokensFromCoords(io.ComfyNode):
             ],
             outputs=[
                 TFTokensSocket.Output("tokens"),
-                io.Int.Output("count"),
                 io.String.Output("info"),
             ],
         )
@@ -314,7 +315,7 @@ class TFTokensFromCoords(io.ComfyNode):
             # declared output and never a message-carrying one -- see
             # TFTokensFromMask for why that route is the wrong one.
             stop = ExecutionBlocker(None)
-            return io.NodeOutput(stop, stop, stop,
+            return io.NodeOutput(stop, stop,
                                  ui=node_preview(text=_nothing_selected()))
         info = _describe(selection)
         # Hand the region map back to this node's own clickable grid, so what it
@@ -325,7 +326,7 @@ class TFTokensFromCoords(io.ComfyNode):
         # workflows 02 and 05. Read back in web/tf_token_grid.js via onExecuted;
         # a 16x16 grid of small ints is about a kilobyte of JSON.
         return io.NodeOutput(
-            selection, selection.count, info,
+            selection, info,
             ui=_coords_ui(info, regions),
         )
 
@@ -349,14 +350,17 @@ class TFTokensCombine(io.ComfyNode):
                 ),
                 TFTokensSocket.Input("b", optional=True),
             ],
-            outputs=[TFTokensSocket.Output("tokens"), io.Int.Output("count")],
+            # 'info' rather than the old 'count' INT, so this node has the same
+            # shape as the two that also produce a selection -- and so the
+            # number lands somewhere, which a bare INT never did.
+            outputs=[TFTokensSocket.Output("tokens"), io.String.Output("info")],
         )
 
     @classmethod
     def execute(cls, a, operation, b=None) -> io.NodeOutput:
         out = token_ops.combine(a, b, operation)
-        return io.NodeOutput(
-            out, out.count, ui=node_preview(text=f"{out.count} tokens after {operation}"))
+        info = f"{out.count} tokens after {operation}"
+        return io.NodeOutput(out, info, ui=node_preview(text=info))
 
 
 class TFTokensPreview(io.ComfyNode):

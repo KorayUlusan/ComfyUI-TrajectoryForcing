@@ -92,7 +92,7 @@
       ],
       "level": [
         "5",
-        3
+        2
       ],
       "target_tokens": [
         "6",
@@ -194,7 +194,7 @@
       ],
       "level": [
         "5",
-        3
+        2
       ],
       "view": "latent PCA",
       "draw_grid": true,

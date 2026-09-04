@@ -337,12 +337,17 @@ class TFLevelsInfo(io.ComfyNode):
             has_intermediate_output=True,
             description="Shape, class, seed and the edit history of a trajectory.",
             inputs=[TFLevelsSocket.Input("levels")],
+            # 'class_id' and 'seed' are here to be wired back into TF Generate,
+            # which is what re-running a loaded trajectory needs. 'num_levels'
+            # used to sit between them and drove nothing -- it is a property of
+            # the method, already in 'info', and no widget anywhere takes it.
             outputs=[
                 io.String.Output("info"),
-                io.Int.Output("num_levels"),
-                io.Int.Output("class_id"),
+                io.Int.Output(
+                    "class_id", tooltip="Wire into TF Generate to re-sample this class."),
                 io.String.Output("class_name"),
-                io.Int.Output("seed"),
+                io.Int.Output(
+                    "seed", tooltip="Wire into TF Generate to reproduce this trajectory."),
             ],
         )
 
@@ -351,5 +356,5 @@ class TFLevelsInfo(io.ComfyNode):
         name = imagenet_classes().get(int(levels.class_id), "")
         report = f"class {levels.class_id}: {name}\n{levels.describe()}" if name else levels.describe()
         return io.NodeOutput(
-            levels.describe(), levels.num_levels, levels.class_id, name, levels.seed,
+            levels.describe(), levels.class_id, name, levels.seed,
             ui=node_preview(text=report))

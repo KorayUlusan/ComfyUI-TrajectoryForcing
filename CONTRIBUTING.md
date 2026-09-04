@@ -34,7 +34,7 @@ logic there and let `nodes_*.py` stay a thin schema-and-wiring layer.
 ## Tests
 
 ```bash
-pytest tests                      # 347 tests, no GPU, ~5 s
+pytest tests                      # 352 tests, no GPU, ~5 s
 sbatch slurm/gpu_smoke.sbatch     # the nodes against the real model
 sbatch slurm/server_smoke.sbatch  # the workflows through a real ComfyUI server
 sbatch slurm/measure_resources.sbatch   # the README's VRAM table
@@ -175,10 +175,15 @@ Reach for `auto_level_input` rather than a bare `Int.Input` with a `-1` default.
 
 ## Nodes show their own results
 
-Stock ComfyUI ships **no node that displays a STRING** — checked against every
-registered core class. So an `info` output is unreachable: forty-two text and
-number outputs across the example workflows went nowhere, including
-`TF Levels Info`, whose entire job is to report.
+An `info` output is unreachable unless the node that computed it shows it:
+forty-two text and number outputs across the example workflows went nowhere,
+including `TF Levels Info`, whose entire job is to report.
+
+> This section used to claim stock ComfyUI ships **no** node that displays a
+> STRING, "checked against every registered core class". That is wrong —
+> `PreviewAny` ("Preview as Text", `comfy_extras/nodes_preview_any.py`) takes
+> `IO.ANY` and prints it. The conclusion survives and is the stronger argument
+> anyway: a result you have to bolt a second node onto is one nobody reads.
 
 Every node that computes a summary therefore renders it itself, through
 `sockets.node_preview(image=..., text=...)`. It returns a merged dict rather
@@ -188,6 +193,41 @@ own key, and a node with both a picture and a number should show both.
 Any node using it needs `has_intermediate_output=True`, or the preview appears
 once and vanishes on the next run when the node is served from cache. A test
 enforces the pairing.
+
+### A number output must name the widget it drives
+
+**ComfyUI cannot suggest a destination for an INT or a FLOAT.** The suggestion
+index is built in the frontend's `extensions/core/slotDefaults.ts`:
+
+```js
+if (type in ComfyWidgets) {
+  var customProperties = input[1]
+  if (!customProperties?.forceInput) continue   // ignore widgets that don't force input
+}
+```
+
+`ComfyWidgets` holds INT, FLOAT, STRING, BOOLEAN and COMBO, so every scalar
+input that is an ordinary widget is skipped. Across all of `comfy_extras` the
+one `forceInput` scalar is `floats_strength`, whose type is `FLOATS`. The upshot
+is that `LiteGraph.slot_types_default_out` has **no `"INT"` key at all**: drag
+from one and the shift-release menu offers nothing. `PreviewAny` does not help —
+it is indexed under `"*"`, and the lookup is by exact type string.
+
+STRING escapes this only because `TFSaveReport.text` is `force_input=True`,
+which puts one sink in the index.
+
+So: **a measurement is not a socket.** Nine were — `changed_tokens`,
+`max_distance`, `arms`, `spread`, `num_regions`, three `count`s and
+`num_levels` — and every one of them dead-ended, because you never drive a knob
+with a measurement. They were also already in the node's own body and in the
+`report` string that `TF Save Report` archives, which is where a number you
+*read* belongs. What survives is what drives a widget: `level` into an edit
+node's `level`, `class_id` and `seed` into `TF Generate`.
+
+`TestEveryScalarOutputDrivesAWidget` holds the line. Every INT/FLOAT output has
+to appear in its `CONSUMERS` map naming the input it feeds, and that input is
+checked to exist with a matching type. Adding a convenient `io.Int.Output`
+fails the suite until you can say where it goes.
 
 ## Adding a node
 
@@ -247,6 +287,29 @@ Two things it handles that are easy to get wrong by hand: an `Int` input with
 `control_after_generate` occupies **two** slots in `widgets_values`, and a
 widget wired to a link becomes a converted widget — it keeps its `widgets_values`
 slot *and* gains an `inputs` entry naming the widget.
+
+**Name the output a link comes from; never count to it.**
+
+```python
+level=(regions, "level")     # yes
+level=(regions, 2)           # refused, with the available names
+```
+
+Positions are unstable on the output side for the same reason they are on the
+input side: removing an output shifts every later one. What makes this worse
+than it sounds is that the workflow tests barely cover it —
+`test_every_link_references_real_nodes_and_slots` compares the origin output's
+type against the link's, and the link's type comes from the *input*, so it
+separates a `TF_LEVELS` from an `IMAGE` and cannot separate two `INT`s. TF
+Region Map carried two adjacent INT outputs until `num_regions` was cut, and
+wiring the region count into TF Feature Edit's `level` would have passed the
+whole suite while editing the wrong level — the silent-wrong-answer shape this
+extension already has a level check to prevent.
+
+An index now raises in `Graph._slot` at generation time, and
+`TestTheWorkflowGeneratorNamesTheOutputsItWires` reads the builders with `ast`
+and checks every name against the live schemas, so a stale name fails in the
+five-second suite rather than in a workflow that looks fine.
 
 Layout is computed, not typed. Nodes that display something carry a realistic
 `BODY_HEIGHT` — a `PreviewImage` is ~66px empty and ~430px with an image, and

@@ -203,17 +203,10 @@
           ]
         },
         {
-          "label": "num_regions",
-          "name": "num_regions",
-          "type": "INT",
-          "slot_index": 2,
-          "links": []
-        },
-        {
           "label": "level",
           "name": "level",
           "type": "INT",
-          "slot_index": 3,
+          "slot_index": 2,
           "links": [
             11
           ]
@@ -304,17 +297,10 @@
           ]
         },
         {
-          "label": "count",
-          "name": "count",
-          "type": "INT",
-          "slot_index": 1,
-          "links": []
-        },
-        {
           "label": "info",
           "name": "info",
           "type": "STRING",
-          "slot_index": 2,
+          "slot_index": 1,
           "links": []
         }
       ],
@@ -365,17 +351,10 @@
           ]
         },
         {
-          "label": "count",
-          "name": "count",
-          "type": "INT",
-          "slot_index": 1,
-          "links": []
-        },
-        {
           "label": "info",
           "name": "info",
           "type": "STRING",
-          "slot_index": 2,
+          "slot_index": 1,
           "links": []
         }
       ],
@@ -476,20 +455,6 @@
             15,
             18
           ]
-        },
-        {
-          "label": "arms",
-          "name": "arms",
-          "type": "INT",
-          "slot_index": 3,
-          "links": []
-        },
-        {
-          "label": "spread",
-          "name": "spread",
-          "type": "FLOAT",
-          "slot_index": 4,
-          "links": []
         }
       ],
       "properties": {
@@ -599,20 +564,6 @@
           "links": [
             16
           ]
-        },
-        {
-          "label": "changed_tokens",
-          "name": "changed_tokens",
-          "type": "INT",
-          "slot_index": 2,
-          "links": []
-        },
-        {
-          "label": "max_distance",
-          "name": "max_distance",
-          "type": "FLOAT",
-          "slot_index": 3,
-          "links": []
         }
       ],
       "properties": {
@@ -796,7 +747,7 @@
     [
       11,
       5,
-      3,
+      2,
       9,
       3,
       "INT"

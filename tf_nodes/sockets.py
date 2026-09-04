@@ -59,11 +59,17 @@ def progress_bar(total: int):
 def node_preview(image=None, text: str = "") -> dict | None:
     """What a node shows in its own body.
 
-    Stock ComfyUI ships no node that displays a STRING -- checked against every
-    registered class -- so an `info` output is invisible unless the node that
-    computed it shows it itself. Before this, forty-two text and number outputs
-    across the four example workflows went nowhere: the edit summary, the resume
-    summary, the region count, and TF Levels Info's entire reason to exist.
+    An `info` output is invisible unless the node that computed it shows it
+    itself. Before this, forty-two text and number outputs across the four
+    example workflows went nowhere: the edit summary, the resume summary, the
+    region count, and TF Levels Info's entire reason to exist.
+
+    This docstring used to claim stock ComfyUI ships no node that displays a
+    STRING. That is wrong: `PreviewAny` ("Preview as Text", comfy_extras/
+    nodes_preview_any.py) takes `IO.ANY` and prints it. The reason for showing
+    text in the node's own body survives the correction and is the stronger
+    one anyway -- a node should not need a second node bolted to it before its
+    result is legible, and a preview you have to wire up is one nobody wires.
 
     Returns the merged dict rather than a `_UIOutput`, because a node that
     produces both a picture and a number should show both, and the two preview

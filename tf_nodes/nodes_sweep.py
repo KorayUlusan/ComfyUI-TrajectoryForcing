@@ -155,12 +155,6 @@ class TFSweep(io.ComfyNode):
                 TFLevelsSocket.Output(
                     "levels", tooltip="The arm named by 'output_arm', already resumed.",
                 ),
-                io.Int.Output("arms"),
-                io.Float.Output(
-                    "spread",
-                    tooltip="Mean pairwise cosine distance between arms at the final level. Near "
-                            "zero means the axis did not change the outcome.",
-                ),
             ],
         )
 
@@ -251,8 +245,11 @@ class TFSweep(io.ComfyNode):
             dirty_level=None,
             pipeline=pipe,
         )
+        # The arm count and the spread are the report's headline numbers, not
+        # sockets: nothing in ComfyUI can receive a measurement. `report` is
+        # what carries them onward, into TF Save Report and a writeup.
         return io.NodeOutput(
-            report, sheet, out, len(arms), round(spread, 6),
+            report, sheet, out,
             ui=node_preview(image=sheet, text=report),
         )
 

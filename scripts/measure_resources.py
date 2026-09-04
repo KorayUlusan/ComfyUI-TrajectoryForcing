@@ -132,8 +132,8 @@ def main() -> int:
     # this is the high-water mark a real session reaches.
     source, = TFGenerate.execute(pipeline=pipeline, class_id=207, seed=592)
     regions, _, _ = TFRegionMap.execute(levels=target, level=2, cosine_threshold=0.9, size=512)
-    tgt, _, _ = TFTokensFromCoords.execute(coords="7,7", levels=target, regions=regions)
-    src, _, _ = TFTokensFromCoords.execute(coords="6,6:9", levels=source, regions=None)
+    tgt, _ = TFTokensFromCoords.execute(coords="7,7", levels=target, regions=regions)
+    src, _ = TFTokensFromCoords.execute(coords="6,6:9", levels=source, regions=None)
     edited, _ = TFFeatureEdit.execute(
         levels=target, level=2, target_tokens=tgt, source_tokens=src,
         source_mode="region mean", strength=1.0, source_level=2, source_levels=source,

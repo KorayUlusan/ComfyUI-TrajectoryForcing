@@ -240,8 +240,11 @@ class TestGenerateAndDecode:
         assert ("pca_tiles", True) in pipeline.calls
 
     def test_levels_info_reports_the_history(self, node_classes, levels):
-        info, n, class_id, class_name, seed = node(node_classes, "TFLevelsInfo").execute(levels=levels)
-        assert (n, class_id, seed) == (LEVELS, 213, 1)
+        info, class_id, class_name, seed = node(node_classes, "TFLevelsInfo").execute(levels=levels)
+        assert (class_id, seed) == (213, 1)
+        # The level count is in the text, not on a socket of its own: no widget
+        # anywhere takes it, so it was a dead output.
+        assert f"levels: {LEVELS}" in info
         assert "stub" in info
 
 
@@ -250,33 +253,34 @@ class TestGenerateAndDecode:
 # ---------------------------------------------------------------------------
 class TestRegionNodes:
     def test_region_map_finds_two_regions(self, node_classes, two_region_levels):
-        regions, image, count, level_out = node(node_classes, "TFRegionMap").execute(
+        regions, image, level_out = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=256
         )
-        assert count == 2
+        # The count rides on the RegionMap itself rather than a separate socket.
+        assert regions.num_regions == 2
         assert regions.level == 2
         assert image.shape == (1, 256, 256, 3)
 
     def test_tokens_from_mask_and_back_to_coords(self, node_classes, levels):
         mask = torch.zeros((1, 64, 64))
         mask[0, 0:8, 0:8] = 1.0  # token (0,0) on an 8x8 grid at 8 px per token
-        tokens, count, info = node(node_classes, "TFTokensFromMask").execute(
+        tokens, info = node(node_classes, "TFTokensFromMask").execute(
             mask=mask, levels=levels, coverage=0.5, regions=None, region_overlap=0.3
         )
-        assert count == 1
+        assert tokens.count == 1
         assert tokens.coords == [(0, 0)]
         assert "1 tokens" in info
 
     def test_tokens_from_mask_snapped_to_a_region(self, node_classes, two_region_levels):
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128
         )
         mask = torch.zeros((1, 64, 64))
         mask[0, 0:8, 0:8] = 1.0
-        tokens, count, _ = node(node_classes, "TFTokensFromMask").execute(
+        tokens, _ = node(node_classes, "TFTokensFromMask").execute(
             mask=mask, levels=two_region_levels, coverage=0.5, regions=regions, region_overlap=0.0
         )
-        assert count == GRID * GRID // 2
+        assert tokens.count == GRID * GRID // 2
         assert all(c < GRID // 2 for _, c in tokens.coords)
 
     @staticmethod
@@ -323,7 +327,7 @@ class TestRegionNodes:
 
     def test_a_stroke_missing_every_region_says_so(self, node_classes, two_region_levels):
         cls = node(node_classes, "TFTokensFromMask")
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128
         )
         mask = torch.zeros((1, 64, 64))
@@ -342,25 +346,27 @@ class TestRegionNodes:
             mask=mask, levels=levels, coverage=0.5, regions=None, region_overlap=0.3,
         )
         assert out.block_execution is None
-        assert out[1] == 1
+        assert out[0].count == 1
         assert "1 tokens selected" in ui_text(out)
 
     def test_tokens_from_coords(self, node_classes, levels):
-        tokens, count, _ = node(node_classes, "TFTokensFromCoords").execute(
+        tokens, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="1,2 3,4:6", levels=levels, regions=None
         )
-        assert count == 4
+        assert tokens.count == 4
         assert (1, 2) in tokens.coords
 
     def test_tokens_combine(self, node_classes, levels):
         coords_node = node(node_classes, "TFTokensFromCoords")
-        a, _, _ = coords_node.execute(coords="0,0 0,1", levels=levels, regions=None)
-        b, _, _ = coords_node.execute(coords="0,1", levels=levels, regions=None)
-        _, count = node(node_classes, "TFTokensCombine").execute(a=a, operation="difference", b=b)
-        assert count == 1
+        a, _ = coords_node.execute(coords="0,0 0,1", levels=levels, regions=None)
+        b, _ = coords_node.execute(coords="0,1", levels=levels, regions=None)
+        out, info = node(node_classes, "TFTokensCombine").execute(
+            a=a, operation="difference", b=b)
+        assert out.count == 1
+        assert "1 tokens after difference" == info
 
     def test_tokens_preview_lists_its_coords(self, node_classes, levels):
-        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        selection, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="2,3", levels=levels, regions=None
         )
         image, coords = node(node_classes, "TFTokensPreview").execute(tokens=selection, size=128)
@@ -399,7 +405,7 @@ class TestRegionNodes:
 # ---------------------------------------------------------------------------
 class TestEditNodes:
     def _tokens(self, node_classes, levels, coords):
-        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        selection, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords=coords, levels=levels, regions=None
         )
         return selection
@@ -477,7 +483,7 @@ class TestEditNodes:
             )
 
     def test_shape_edit_moves_a_boundary_without_changing_features(self, node_classes, two_region_levels):
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128
         )
         boundary = self._tokens(node_classes, two_region_levels, "0,4")   # leftmost right-region token
@@ -492,7 +498,7 @@ class TestEditNodes:
         assert "shape edit" in info
 
     def test_shape_edit_rejects_a_region_map_from_another_level(self, node_classes, two_region_levels):
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=1, cosine_threshold=0.9, size=128
         )
         with pytest.raises(ValueError, match="built on level 1"):
@@ -504,7 +510,7 @@ class TestEditNodes:
             )
 
     def test_shape_edit_rejects_one_region_talking_to_itself(self, node_classes, two_region_levels):
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128
         )
         with pytest.raises(ValueError, match="two different regions"):
@@ -518,7 +524,7 @@ class TestEditNodes:
 
 class TestResume:
     def _edited(self, node_classes, levels, level=1):
-        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        selection, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=levels, regions=None
         )
         out, _ = node(node_classes, "TFFeatureEdit").execute(
@@ -667,7 +673,7 @@ class TestLevelAgreement:
     """
 
     def _regions_at(self, node_classes, stack, level):
-        regions, _, _, level_out = node(node_classes, "TFRegionMap").execute(
+        regions, _, level_out = node(node_classes, "TFRegionMap").execute(
             levels=stack, level=level, cosine_threshold=0.9, size=64)
         assert level_out == level, "TF Region Map reports the level it clustered"
         return regions
@@ -679,9 +685,9 @@ class TestLevelAgreement:
     def test_feature_edit_rejects_a_selection_from_another_level(
             self, node_classes, two_region_levels):
         regions = self._regions_at(node_classes, two_region_levels, 2)
-        target, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        target, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=two_region_levels, regions=regions)
-        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        source, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="7,7", levels=two_region_levels)
         with pytest.raises(ValueError, match="level 2's regions but is being applied at level 1"):
             node(node_classes, "TFFeatureEdit").execute(
@@ -690,9 +696,9 @@ class TestLevelAgreement:
 
     def test_a_matching_level_is_fine(self, node_classes, two_region_levels):
         regions = self._regions_at(node_classes, two_region_levels, 2)
-        target, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        target, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=two_region_levels, regions=regions)
-        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        source, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="7,7", levels=two_region_levels)
         out, _ = node(node_classes, "TFFeatureEdit").execute(
             levels=two_region_levels, level=2, target_tokens=target, source_tokens=source,
@@ -701,7 +707,7 @@ class TestLevelAgreement:
 
     def test_an_unsnapped_selection_is_accepted_anywhere(self, node_classes, two_region_levels):
         # Typed coordinates with no region map name no level, so they carry none.
-        plain, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        plain, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=two_region_levels)
         assert plain.level is None
         node(node_classes, "TFFeatureEdit").execute(
@@ -710,10 +716,10 @@ class TestLevelAgreement:
 
     def test_combining_selections_from_two_levels_is_refused(
             self, node_classes, two_region_levels):
-        a_tokens, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        a_tokens, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=two_region_levels,
             regions=self._regions_at(node_classes, two_region_levels, 1))
-        b_tokens, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        b_tokens, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=two_region_levels,
             regions=self._regions_at(node_classes, two_region_levels, 2))
         with pytest.raises(ValueError, match="level 1's regions with one from level 2"):
@@ -723,8 +729,9 @@ class TestLevelAgreement:
 
 class TestCoordinateErgonomics:
     def test_coords_need_no_levels_wire(self, node_classes):
-        tokens, count, _ = node(node_classes, "TFTokensFromCoords").execute(coords="15,15")
-        assert count == 1 and tokens.mask.shape == (16, 16), "defaults to the released 16x16 grid"
+        tokens, _ = node(node_classes, "TFTokensFromCoords").execute(coords="15,15")
+        assert tokens.count == 1 and tokens.mask.shape == (16, 16), \
+            "defaults to the released 16x16 grid"
 
     def test_coords_still_honour_a_wired_grid(self, node_classes, levels):
         with pytest.raises(ValueError, match="outside"):
@@ -741,7 +748,7 @@ class TestCoordinateErgonomics:
 
     def test_levels_info_names_the_class(self, node_classes, pipeline):
         stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=213, seed=1)
-        _, _, class_id, class_name, _ = node(node_classes, "TFLevelsInfo").execute(levels=stack)
+        _, class_id, class_name, _ = node(node_classes, "TFLevelsInfo").execute(levels=stack)
         assert class_id == 213
         assert class_name == "Irish setter"
 
@@ -752,11 +759,11 @@ class TestCompareLevels:
     def _edit_and_resume(self, node_classes, pipeline, level=2):
         before, = node(node_classes, "TFGenerate").execute(
             pipeline=pipeline, class_id=213, seed=1)
-        target, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        target, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="1,1", levels=before)
         # A different source token: writing a token's own value onto itself is
         # an identity edit, and then only the re-sampled levels above it move.
-        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        source, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="5,5", levels=before)
         edited, _ = node(node_classes, "TFFeatureEdit").execute(
             levels=before, level=level, target_tokens=target, source_tokens=source,
@@ -767,34 +774,35 @@ class TestCompareLevels:
 
     def test_identical_trajectories_report_no_change(self, node_classes, pipeline):
         stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=1, seed=1)
-        report, images, changed, peak = node(node_classes, "TFCompareLevels").execute(
+        report, images = node(node_classes, "TFCompareLevels").execute(
             before=stack, after=stack, size=256, decode_difference=False, sheet_layout="separate frames")
-        assert changed == 0
-        assert peak == 0.0
+        # The totals live in the report now, not on INT/FLOAT sockets nothing
+        # could receive.
+        assert "total: 0 tokens changed, peak distance 0.0000" in report
         assert "Nothing changed" in report
         assert images.shape[0] == LEVELS, "one heatmap tile per level"
 
     def test_it_localises_the_edit_to_the_right_levels(self, node_classes, pipeline):
         before, after = self._edit_and_resume(node_classes, pipeline, level=2)
-        report, _, changed, peak = node(node_classes, "TFCompareLevels").execute(
+        report, _ = node(node_classes, "TFCompareLevels").execute(
             before=before, after=after, size=256, decode_difference=False, sheet_layout="separate frames")
-        assert changed > 0 and peak > 0
+        assert "total: 0 tokens changed" not in report
         # the stub re-samples only above the edited level, so 0..1 must be clean
         assert "First level that differs: 2." in report
         assert "Levels 0..1 are untouched" in report
 
     def test_the_report_has_a_row_per_level(self, node_classes, pipeline):
         before, after = self._edit_and_resume(node_classes, pipeline)
-        report, _, _, _ = node(node_classes, "TFCompareLevels").execute(
+        report, _ = node(node_classes, "TFCompareLevels").execute(
             before=before, after=after, size=256, decode_difference=False, sheet_layout="separate frames")
         for level in range(LEVELS):
             assert f"Level {level}" in report
 
     def test_decoding_the_difference_adds_a_frame(self, node_classes, pipeline):
         before, after = self._edit_and_resume(node_classes, pipeline)
-        plain, _, _, _ = node(node_classes, "TFCompareLevels").execute(
+        plain, _ = node(node_classes, "TFCompareLevels").execute(
             before=before, after=after, size=256, decode_difference=False, sheet_layout="separate frames")
-        report, images, _, _ = node(node_classes, "TFCompareLevels").execute(
+        report, images = node(node_classes, "TFCompareLevels").execute(
             before=before, after=after, size=256, decode_difference=True, sheet_layout="separate frames")
         assert images.shape[0] == LEVELS + 1
         assert "mean |delta|" in report and "mean |delta|" not in plain
@@ -803,7 +811,7 @@ class TestCompareLevels:
         # to_image stacks them into one batch; numpy will not stack ragged frames,
         # and a decoded difference is a different size from a heatmap tile.
         before, after = self._edit_and_resume(node_classes, pipeline)
-        _, images, _, _ = node(node_classes, "TFCompareLevels").execute(
+        _, images = node(node_classes, "TFCompareLevels").execute(
             before=before, after=after, size=640, decode_difference=True, sheet_layout="separate frames")
         assert images.shape[0] == LEVELS + 1
 
@@ -826,10 +834,9 @@ class TestCompareLevels:
         b[2, 0, 0] = 0.0
         before = LevelStack(latents=a, class_id=1, seed=1, pipeline=pipeline)
         after = LevelStack(latents=b, class_id=1, seed=1, pipeline=pipeline)
-        report, _, changed, peak = node(node_classes, "TFCompareLevels").execute(
+        report, _ = node(node_classes, "TFCompareLevels").execute(
             before=before, after=after, size=256, decode_difference=False, sheet_layout="separate frames")
-        assert changed == 1
-        assert np.isfinite(peak) and peak == 1.0
+        assert "total: 1 tokens changed, peak distance 1.0000" in report
         assert "nan" not in report.lower()
 
 
@@ -863,9 +870,9 @@ class TestSweepEdit:
         )
 
     def _run(self, node_classes, levels, **overrides):
-        target, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        target, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="1,1 1,2", levels=levels)
-        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        source, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="5,5", levels=levels)
         kwargs = {**self.DEFAULTS, "target_tokens": target, "source_tokens": source}
         kwargs.update(overrides)
@@ -873,9 +880,11 @@ class TestSweepEdit:
 
     # ----- the loop itself -----
     def test_one_arm_per_value(self, node_classes, levels):
-        report, sheet, _, arms, _ = self._run(
+        report, sheet, _ = self._run(
             node_classes, levels, values="1,2,3", sheet_layout="separate frames")
-        assert arms == 3
+        # The arm count is stated in the report rather than handed out as an
+        # INT socket: nothing in ComfyUI can receive a measurement.
+        assert "(3 arms)" in report
         assert sheet.shape[0] == 4, "the no-edit baseline, then one frame per arm"
         for seed in (1, 2, 3):
             assert f"\n{seed:<12g}" in f"\n{report}" or f"\n{seed} " in report
@@ -908,13 +917,13 @@ class TestSweepEdit:
         # Not against the input trajectory: with a seed axis that folds the
         # seed's own effect into every row, and the table then says the edit
         # did something when only the re-sample did.
-        report, _, _, _, _ = self._run(node_classes, levels, values="1,2,3")
+        report, _, _ = self._run(node_classes, levels, values="1,2,3")
         assert "resumed identically without the edit" in report
-        off, _, _, _, _ = self._run(node_classes, levels, values="1,2,3", baseline=False)
+        off, _, _ = self._run(node_classes, levels, values="1,2,3", baseline=False)
         assert "baseline off" in off
 
     def test_the_table_has_a_row_per_arm_with_a_change_count(self, node_classes, levels):
-        report, _, _, _, _ = self._run(node_classes, levels, values="1,2,3")
+        report, _, _ = self._run(node_classes, levels, values="1,2,3")
         body = report.splitlines()
         rows = [ln for ln in body if "/" in ln and ln[0].isdigit()]
         assert len(rows) == 3, body
@@ -925,45 +934,45 @@ class TestSweepEdit:
         # The stub resume conditions each level on the one below, so an edit at
         # l* must still be visible at the top. If this ever reads zero the
         # measurement is wired to the wrong reference.
-        report, _, _, _, spread = self._run(node_classes, levels, values="1,2,3")
+        report, _, _ = self._run(node_classes, levels, values="1,2,3")
         assert "changed nothing at all" not in report
-        assert spread > 0
+        assert "does change the outcome" in report
 
     def test_the_spread_says_whether_the_axis_mattered(self, node_classes, levels):
-        report, _, _, _, spread = self._run(node_classes, levels, values="1,2,3")
+        report, _, _ = self._run(node_classes, levels, values="1,2,3")
         assert "spread across arms" in report
-        assert spread > 0 and "does change the outcome" in report
+        assert "does change the outcome" in report
 
     def test_a_single_arm_reports_no_spread_rather_than_zero(self, node_classes, levels):
         # Zero spread over one arm is not "the axis did nothing", it is "there
         # was nothing to compare" -- and the two read identically as a number.
-        report, _, _, arms, _ = self._run(node_classes, levels, values="1")
-        assert arms == 1
+        report, _, _ = self._run(node_classes, levels, values="1")
+        assert "(1 arms)" in report
         assert "n/a with a single arm" in report
 
     # ----- what leaves the node -----
     def test_the_picked_arm_leaves_on_the_levels_output(self, node_classes, levels):
-        _, _, first, _, _ = self._run(node_classes, levels, values="4,5,6", output_arm=0)
-        _, _, third, _, _ = self._run(node_classes, levels, values="4,5,6", output_arm=2)
+        _, _, first = self._run(node_classes, levels, values="4,5,6", output_arm=0)
+        _, _, third = self._run(node_classes, levels, values="4,5,6", output_arm=2)
         assert (first.seed, third.seed) == (4, 6)
         assert not np.allclose(first.latents[-1], third.latents[-1])
 
     def test_the_output_arm_carries_no_pending_edit(self, node_classes, levels):
         # It has been resumed, so nothing above l* is stale; leaving the marker
         # set would make TF Decode warn about a trajectory that is fine.
-        _, _, out, _, _ = self._run(node_classes, levels, values="1,2")
+        _, _, out = self._run(node_classes, levels, values="1,2")
         assert out.dirty_level is None
         assert "sweep arm 0 of 2" in out.history[-1]
 
     def test_an_out_of_range_output_arm_clamps_and_says_so(self, node_classes, levels):
-        report, _, out, _, _ = self._run(node_classes, levels, values="1,2", output_arm=9)
+        report, _, out = self._run(node_classes, levels, values="1,2", output_arm=9)
         assert out.seed == 2
         assert "clamped to the last arm" in report
 
     def test_the_trajectory_keeps_its_pipeline_so_downstream_nodes_work(
             self, node_classes, levels):
-        _, _, out, _, _ = self._run(node_classes, levels, values="1,2")
-        report, _, _, _ = node(node_classes, "TFCompareLevels").execute(
+        _, _, out = self._run(node_classes, levels, values="1,2")
+        report, _ = node(node_classes, "TFCompareLevels").execute(
             before=levels, after=out, size=128, decode_difference=False, sheet_layout="separate frames")
         assert "tokens changed" in report
 
@@ -973,16 +982,16 @@ class TestSweepEdit:
         # frames; a decoded arm and a PCA tile are different sizes. The same
         # equality is what lets them be stitched into one sheet at all.
         kw = dict(sheet_layout="separate frames")
-        _, decoded, _, _, _ = self._run(node_classes, levels, values="1,2", decode=True, **kw)
-        _, latent, _, _, _ = self._run(node_classes, levels, values="1,2", decode=False, **kw)
+        _, decoded, _ = self._run(node_classes, levels, values="1,2", decode=True, **kw)
+        _, latent, _ = self._run(node_classes, levels, values="1,2", decode=False, **kw)
         assert decoded.shape[0] == latent.shape[0] == 3
 
     def test_the_arms_are_stitched_side_by_side_by_default(self, node_classes, levels):
         # Comparison is the whole reason the node exists, and a batch puts the
         # arms in separate pictures -- five frames sharing a 320px node body
         # compare nothing, and SaveImage writes five unrelated files.
-        _, sheet, _, _, _ = self._run(node_classes, levels, values="1,2")
-        _, frames, _, _, _ = self._run(node_classes, levels, values="1,2",
+        _, sheet, _ = self._run(node_classes, levels, values="1,2")
+        _, frames, _ = self._run(node_classes, levels, values="1,2",
                                        sheet_layout="separate frames")
         assert sheet.shape[0] == 1, "one image, not a batch"
         assert frames.shape[0] == 3
@@ -993,8 +1002,8 @@ class TestSweepEdit:
     def test_a_long_sweep_wraps_instead_of_becoming_a_strip(self, node_classes, levels):
         # Twelve arms in one row is 4600px wide at the default size, an aspect
         # ratio nothing displays usefully.
-        _, wide, _, _, _ = self._run(node_classes, levels, values="1-3")
-        _, grid, _, _, _ = self._run(node_classes, levels, values="1-9")
+        _, wide, _ = self._run(node_classes, levels, values="1-3")
+        _, grid, _ = self._run(node_classes, levels, values="1-9")
         assert wide.shape[1] < grid.shape[1], "the long one gained rows"
         assert grid.shape[2] < 9 * 128, "and stopped growing sideways"
 
@@ -1021,11 +1030,11 @@ class TestSweepEdit:
         from dataclasses import replace
 
         levels = replace(two_region_levels, pipeline=pipeline)
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=levels, level=1, cosine_threshold=0.9, size=128)
-        snapped, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        snapped, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=levels, regions=regions)
-        plain, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        plain, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="5,5", levels=levels)
         with pytest.raises(ValueError, match="level 1's regions"):
             node(node_classes, "TFSweep").execute(
@@ -1041,13 +1050,13 @@ class TestSweepEdit:
         from dataclasses import replace
 
         levels = replace(two_region_levels, pipeline=pipeline)
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=levels, level=1, cosine_threshold=0.9, size=128)
-        snapped, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        snapped, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=levels, regions=regions)
-        plain, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        plain, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="5,5", levels=levels)
-        report, _, _, _, _ = node(node_classes, "TFSweep").execute(
+        report, _, _ = node(node_classes, "TFSweep").execute(
             levels=levels, target_tokens=snapped, source_tokens=plain,
             **{**self.DEFAULTS, "axis": "level (l*)", "values": "0-2"})
         assert "snapped to level 1's regions" in report
@@ -1056,7 +1065,7 @@ class TestSweepEdit:
         from tf_nodes.data import TokenSelection
 
         empty = TokenSelection(mask=np.zeros(levels.grid, dtype=bool))
-        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        source, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="5,5", levels=levels)
         with pytest.raises(ValueError, match="target_tokens is empty"):
             node(node_classes, "TFSweep").execute(
@@ -1073,7 +1082,7 @@ class TestSweepEdit:
     def test_the_report_records_the_pinned_settings(self, node_classes, levels):
         # A table read a month later has to say what was held fixed, or the
         # numbers in it cannot be reproduced.
-        report, _, _, _, _ = self._run(node_classes, levels, values="1,2", level=1, strength=0.5)
+        report, _, _ = self._run(node_classes, levels, values="1,2", level=1, strength=0.5)
         assert "pinned: level 1, strength 0.50, class 213" in report
         assert "2 target tokens" in report and "1 source tokens" in report
 
@@ -1176,7 +1185,7 @@ class TestOneWidgetInsteadOfTwo:
         assert images.shape[0] == 1
 
     def test_resume_follows_the_edit_when_left_alone(self, node_classes, pipeline, levels):
-        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        selection, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=levels)
         edited, _ = node(node_classes, "TFFeatureEdit").execute(
             levels=levels, level=1, target_tokens=selection, source_tokens=selection,
@@ -1191,7 +1200,7 @@ class TestOneWidgetInsteadOfTwo:
         assert "resume from level 2" in info
 
     def test_source_level_defaults_to_the_edit_level(self, node_classes, levels):
-        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        selection, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=levels)
         _, info = node(node_classes, "TFFeatureEdit").execute(
             levels=levels, level=3, target_tokens=selection, source_tokens=selection,
@@ -1233,13 +1242,89 @@ class TestAdvancedWidgets:
             assert wanted <= shown, f"{schema.node_id} hides {wanted - shown}"
 
 
-class TestEveryNodeShowsItsOwnResult:
-    """Stock ComfyUI has no node that displays a STRING.
+class TestEveryScalarOutputDrivesAWidget:
+    """A number output has to name the widget that receives it.
 
-    Verified against every registered core class: an `info` output is
-    unreachable unless the node that computed it shows it itself. Before this,
-    forty-two text and number outputs across the four example workflows went
-    nowhere, including TF Levels Info's entire reason to exist.
+    ComfyUI cannot suggest a destination for an INT or a FLOAT. The suggestion
+    index is built in `extensions/core/slotDefaults.ts`, which skips every input
+    whose type is in `ComfyWidgets` -- INT, FLOAT, STRING, BOOLEAN, COMBO --
+    unless it is declared `forceInput`. Across all of comfy_extras the only such
+    scalar is `floats_strength`, and its type is FLOATS. So `slot_types_default_
+    out` has no "INT" key at all, and dragging from one dead-ends in a menu with
+    nothing in it. That is what was reported.
+
+    Nine outputs here were measurements: changed_tokens, max_distance, arms,
+    spread, num_regions, three counts, num_levels. A measurement never drives a
+    knob, so no destination could ever exist for one; each was also already in
+    the node's own body text and in the report TF Save Report archives. They are
+    gone. What is left has to say where it goes, and this is the check --
+    without it the next convenient `io.Int.Output` walks straight back in.
+
+    STRING is deliberately exempt: `TFSaveReport.text` is `force_input=True`,
+    which puts it in the index, so text does have somewhere to land.
+    """
+
+    # output -> the widget it is meant to be wired into.
+    CONSUMERS = {
+        ("TFImageNetClass", "class_id"): ("TFGenerate", "class_id"),
+        ("TFLevelsInfo", "class_id"): ("TFGenerate", "class_id"),
+        ("TFLevelsInfo", "seed"): ("TFGenerate", "seed"),
+        ("TFRegionMap", "level"): ("TFFeatureEdit", "level"),
+        ("TFLevelCanvas", "level"): ("TFFeatureEdit", "level"),
+    }
+
+    def scalar_outputs(self, node_classes):
+        for cls in node_classes:
+            schema = cls.define_schema()
+            for out in schema.outputs:
+                if getattr(out, "io_type", None) in ("INT", "FLOAT"):
+                    yield schema.node_id, out.id
+
+    def test_every_one_names_its_consumer(self, node_classes):
+        undeclared = [
+            f"{node_id}.{name}" for node_id, name in self.scalar_outputs(node_classes)
+            if (node_id, name) not in self.CONSUMERS
+        ]
+        assert not undeclared, (
+            f"{undeclared} are INT/FLOAT outputs with no consumer listed. ComfyUI cannot "
+            "suggest a destination for a scalar, so an output nothing takes is a dead "
+            "socket. Put the number in the node's text instead, or add it to CONSUMERS "
+            "naming the widget it drives."
+        )
+
+    def test_the_named_consumer_actually_exists_and_matches(self, node_classes):
+        for source, (target_id, input_id) in self.CONSUMERS.items():
+            schema = node(node_classes, target_id).define_schema()
+            found = [i for i in schema.inputs if i.id == input_id]
+            assert found, f"{source} claims to drive {target_id}.{input_id}, which is gone"
+            out = next(o for o in node(node_classes, source[0]).define_schema().outputs
+                       if o.id == source[1])
+            assert found[0].io_type == out.io_type, (
+                f"{source[0]}.{source[1]} is {out.io_type} but "
+                f"{target_id}.{input_id} takes {found[0].io_type}")
+
+    def test_no_node_declares_a_measurement_as_a_socket(self, node_classes):
+        # The specific nine, by name, so a revert is loud rather than silent.
+        gone = {"changed_tokens", "max_distance", "arms", "spread", "num_regions",
+                "count", "num_levels"}
+        back = [f"{node_id}.{name}"
+                for node_id, name in self.scalar_outputs(node_classes) if name in gone]
+        assert not back, f"{back} came back as sockets; they belong in the report text"
+
+
+class TestEveryNodeShowsItsOwnResult:
+    """A node's own body is the only place its text is certain to be read.
+
+    An `info` output is unreachable unless the node that computed it shows it
+    itself. Before this, forty-two text and number outputs across the four
+    example workflows went nowhere, including TF Levels Info's entire reason to
+    exist.
+
+    This docstring used to claim stock ComfyUI ships no node that displays a
+    STRING, "verified against every registered core class". That is wrong --
+    `PreviewAny` ("Preview as Text") takes `IO.ANY` and prints it. The reason
+    survives the correction and is the better one anyway: a result you have to
+    bolt a second node onto to read is one nobody reads.
     """
 
     TEXT_PRODUCERS = {
@@ -1259,8 +1344,8 @@ class TestEveryNodeShowsItsOwnResult:
                 f"{schema.node_id} shows text, so its preview must survive a cached re-run")
 
     def test_the_edit_summary_is_visible(self, node_classes, levels, pipeline):
-        target, _, _ = node(node_classes, "TFTokensFromCoords").execute(coords="1,1", levels=levels)
-        source, _, _ = node(node_classes, "TFTokensFromCoords").execute(coords="5,5", levels=levels)
+        target, _ = node(node_classes, "TFTokensFromCoords").execute(coords="1,1", levels=levels)
+        source, _ = node(node_classes, "TFTokensFromCoords").execute(coords="5,5", levels=levels)
         out = node(node_classes, "TFFeatureEdit").execute(
             levels=levels, level=2, target_tokens=target, source_tokens=source,
             source_mode="region mean", strength=1.0, source_level=2, source_levels=None)
@@ -1295,7 +1380,7 @@ class TestEveryNodeShowsItsOwnResult:
         assert len(ui_images(out)) == 1
 
     def test_tokens_preview_shows_the_selection_it_drew(self, node_classes, levels):
-        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        selection, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="2,3", levels=levels)
         out = node(node_classes, "TFTokensPreview").execute(tokens=selection, size=128)
         assert len(ui_images(out)) == 1
@@ -1367,7 +1452,7 @@ class TestTheAutoConvention:
             assert widget.min == AUTO, f"{node_id}.{widget.id} allows values below the sentinel"
 
     def test_resume_reports_what_auto_chose(self, node_classes, pipeline, levels):
-        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        selection, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=levels)
         edited, _ = node(node_classes, "TFFeatureEdit").execute(
             levels=levels, level=1, target_tokens=selection, source_tokens=selection,
@@ -1384,7 +1469,7 @@ class TestTheAutoConvention:
         assert "auto" not in info
 
     def test_feature_edit_says_when_the_source_level_was_auto(self, node_classes, levels):
-        selection, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        selection, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=levels)
         _, auto = node(node_classes, "TFFeatureEdit").execute(
             levels=levels, level=2, target_tokens=selection, source_tokens=selection,
@@ -1440,6 +1525,87 @@ class TestTheSmokeScriptsCallNodesCorrectly:
         assert checked >= 6, f"only matched {checked} call sites; the parser has drifted"
 
 
+class TestTheWorkflowGeneratorNamesTheOutputsItWires:
+    """`scripts/make_workflows.py` addresses an output by name, never by index.
+
+    The generator exists because LiteGraph stores widget values positionally, so
+    a hand-written workflow goes wrong silently when a widget is added. Outputs
+    have exactly the same problem and had exactly the opposite treatment: inputs
+    were set by id and links counted to a slot. Cutting `num_regions` moved
+    `TFRegionMap.level` from slot 3 to slot 2 and needed six call sites edited by
+    hand.
+
+    The cost is not the six edits, it is that nothing would have caught getting
+    one wrong. `test_every_link_references_real_nodes_and_slots` compares the
+    origin output's type against the link's, which is taken from the *input* --
+    so it separates a TF_LEVELS from an IMAGE and cannot separate two INTs. TF
+    Region Map had two adjacent INT outputs until `num_regions` was cut, and
+    wiring the region count into TF Feature Edit's `level` would have produced a
+    workflow that passed every test and edited level 3 instead of level 2.
+
+    This reads the builders out of the source the way
+    `TestTheSmokeScriptsCallNodesCorrectly` reads gpu_smoke's call sites, and
+    needs no ComfyUI: the origin node types are this extension's own.
+    """
+
+    GENERATOR = Path(__file__).resolve().parent.parent / "scripts" / "make_workflows.py"
+
+    def _links(self, source: str):
+        """Every link in every builder, as (builder, origin node type, slot ast node).
+
+        Scoped per function, because the variable names are reused: `edit` is a
+        TF Feature Edit in workflow 02 and a TF Shape Edit in 04, so one map
+        across the file would resolve half the links against the wrong schema.
+        Statements are read in body order rather than with `ast.walk`, since the
+        point is that a name is assigned before it is wired.
+        """
+        import ast
+
+        for func in ast.parse(source).body:
+            if not isinstance(func, ast.FunctionDef):
+                continue
+            node_type_of: dict[str, str] = {}
+            for statement in func.body:
+                inner = getattr(statement, "value", None)
+                if not isinstance(inner, ast.Call):
+                    continue
+                if not (isinstance(inner.func, ast.Attribute) and inner.func.attr == "add"):
+                    continue
+                for keyword in inner.keywords:
+                    value = keyword.value
+                    if (isinstance(value, ast.Tuple) and len(value.elts) == 2
+                            and isinstance(value.elts[0], ast.Name)):
+                        yield func.name, node_type_of.get(value.elts[0].id), value.elts[1]
+                if isinstance(statement, ast.Assign) and isinstance(statement.targets[0], ast.Name):
+                    node_type_of[statement.targets[0].id] = inner.args[0].value
+
+    def test_no_link_counts_to_a_slot(self):
+        import ast
+
+        counted = [
+            f"{builder}: {origin} slot {ast.dump(slot)}"
+            for builder, origin, slot in self._links(self.GENERATOR.read_text())
+            if not (isinstance(slot, ast.Constant) and isinstance(slot.value, str))
+        ]
+        assert not counted, (
+            f"{counted} address an output by position. Name it instead -- an index shifts "
+            "when an output is removed, and the link lands on the wrong socket without "
+            "anything failing when the two outputs share a type.")
+
+    def test_every_named_output_exists_on_the_node_it_comes_from(self, node_classes):
+        by_id = {c.define_schema().node_id: c for c in node_classes}
+        checked = 0
+        for builder, origin, slot in self._links(self.GENERATOR.read_text()):
+            cls = by_id.get(origin)  # Painter and PreviewImage are core, not ours
+            if cls is None or not isinstance(getattr(slot, "value", None), str):
+                continue
+            available = [out.id for out in cls.define_schema().outputs]
+            assert slot.value in available, (
+                f"{builder} wires {origin}.{slot.value}, which has {available}")
+            checked += 1
+        assert checked >= 60, f"only matched {checked} links; the parser has drifted"
+
+
 class TestSeveralFramesArriveAsOneImage:
     """ComfyUI pages a multi-image output one frame at a time.
 
@@ -1484,7 +1650,7 @@ class TestSeveralFramesArriveAsOneImage:
 
     def test_compare_stitches_its_per_level_heatmaps(self, node_classes, pipeline):
         stack, = node(node_classes, "TFGenerate").execute(pipeline=pipeline, class_id=1, seed=1)
-        _, heatmap, _, _ = node(node_classes, "TFCompareLevels").execute(
+        _, heatmap = node(node_classes, "TFCompareLevels").execute(
             before=stack, after=stack, size=256, decode_difference=False,
             sheet_layout="contact sheet")
         assert heatmap.shape[0] == 1
@@ -1520,12 +1686,12 @@ class TestSweepingAShapeEdit:
         from dataclasses import replace
 
         levels = replace(two_region_levels, pipeline=pipeline)
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=levels, level=1, cosine_threshold=0.9, size=128)
         # two_region_levels splits into a left and a right half at every level
-        left, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        left, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=levels)
-        right, _, _ = node(node_classes, "TFTokensFromCoords").execute(
+        right, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords=f"0,{GRID - 1}", levels=levels)
         return levels, regions, left, right
 
@@ -1537,20 +1703,20 @@ class TestSweepingAShapeEdit:
         return node(node_classes, "TFSweep").execute(levels=levels, **kwargs)
 
     def test_a_shape_edit_sweeps_over_seeds(self, node_classes, setup):
-        report, _, _, arms, _ = self.run(node_classes, setup, values="1,2,3")
-        assert arms == 3
+        report, _, _ = self.run(node_classes, setup, values="1,2,3")
+        assert "(3 arms)" in report
         assert "edit:   shape" in report, report
 
     def test_it_sweeps_over_strength_too(self, node_classes, setup):
-        _, _, _, arms, _ = self.run(node_classes, setup, axis="strength", values="0.5,1.0")
-        assert arms == 2
+        report, _, _ = self.run(node_classes, setup, axis="strength", values="0.5,1.0")
+        assert "(2 arms)" in report
 
     def test_the_receiving_region_supplies_the_feature_not_the_named_token(
             self, node_classes, setup):
         # A shape edit must not change what the region looks like, so f_src is
         # the mean of the *whole* receiving region.
         levels, regions, left, right = setup
-        _, _, out, _, _ = self.run(node_classes, setup, values="1")
+        _, _, out = self.run(node_classes, setup, values="1")
         expected = levels.level(1)[regions.mask_for(
             sorted({regions.region_of(r, c) for r, c in right.coords}))].mean(axis=0)
         np.testing.assert_allclose(out.level(1)[0, 0], expected, rtol=1e-5)
@@ -1574,7 +1740,7 @@ class TestSweepingAShapeEdit:
             self.run(node_classes, setup, level=2)
 
     def test_unwiring_regions_is_still_a_feature_edit(self, node_classes, setup):
-        report, _, _, _, _ = self.run(node_classes, setup, regions=None)
+        report, _, _ = self.run(node_classes, setup, regions=None)
         assert "edit:   feature" in report
 
 
@@ -1602,7 +1768,7 @@ class TestTheGridIsToldAboutRegions:
 
     def test_the_map_is_handed_back_when_one_is_wired(
             self, node_classes, two_region_levels):
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128)
         out = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=two_region_levels, regions=regions)
@@ -1612,7 +1778,7 @@ class TestTheGridIsToldAboutRegions:
         assert payload["num_regions"] == 2
 
     def test_the_ids_match_the_map_exactly(self, node_classes, two_region_levels):
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128)
         out = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=two_region_levels, regions=regions)
@@ -1623,7 +1789,7 @@ class TestTheGridIsToldAboutRegions:
         # It crosses the websocket; a numpy array would not survive.
         import json
 
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128)
         out = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=two_region_levels, regions=regions)
@@ -1631,7 +1797,7 @@ class TestTheGridIsToldAboutRegions:
 
     def test_the_node_still_shows_its_own_text(self, node_classes, two_region_levels):
         # The payload is added beside the preview, never instead of it.
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128)
         out = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=two_region_levels, regions=regions)
@@ -1641,13 +1807,13 @@ class TestTheGridIsToldAboutRegions:
             self, node_classes, two_region_levels):
         # The whole point: one clicked cell becomes a whole region, and the
         # grid must be able to work that out from what it is given.
-        regions, _, _, _ = node(node_classes, "TFRegionMap").execute(
+        regions, _, _ = node(node_classes, "TFRegionMap").execute(
             levels=two_region_levels, level=2, cosine_threshold=0.9, size=128)
-        selection, count, _ = node(node_classes, "TFTokensFromCoords").execute(
+        selection, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=two_region_levels, regions=regions)
         ids = np.array(self.payload(node(node_classes, "TFTokensFromCoords").execute(
             coords="0,0", levels=two_region_levels, regions=regions))["ids"])
-        assert count > 1, "a region is more than the token that named it"
+        assert selection.count > 1, "a region is more than the token that named it"
         np.testing.assert_array_equal(selection.mask, ids == ids[0, 0])
 
 
@@ -1685,6 +1851,6 @@ class TestNothingPickedStopsTheGraph:
         assert node(node_classes, "TFTokensFromCoords").define_schema().has_intermediate_output
 
     def test_a_real_selection_is_unaffected(self, node_classes, levels):
-        selection, count, _ = node(node_classes, "TFTokensFromCoords").execute(
+        selection, _ = node(node_classes, "TFTokensFromCoords").execute(
             coords="7,7", levels=levels)
-        assert count == 1 and selection.count == 1
+        assert selection.count == 1

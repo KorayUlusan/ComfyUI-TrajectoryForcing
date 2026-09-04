@@ -155,8 +155,17 @@ widgets* to see everything a node can do.
 
 **Every node shows its own result in its body**: the edit summary, the region
 count, the selection, the comparison table. Nothing needs wiring to a preview
-node to be read, which matters because stock ComfyUI has no node that can
-display a string at all.
+node to be read.
+
+**Measurements are text, not sockets.** The tokens-changed total, the peak
+distance, the spread across a sweep's arms, the region and selection counts —
+all of them are in the node's own body and in the `report` string, which *TF
+Save Report* writes to a file. None of them is an output you can drag from,
+because ComfyUI has nowhere to put a number: its suggestion index skips every
+INT and FLOAT input that is an ordinary widget, so a drag from one dead-ends in
+an empty menu. Wire `report` into *TF Save Report* to keep the numbers; the
+outputs that *are* sockets — a region map's `level`, a class id, a seed — are
+there because a widget on another node receives them.
 
 **Several frames arrive as one image.** ComfyUI shows a multi-image output one
 frame at a time, behind a small `1/4` button that is easy to miss — so four

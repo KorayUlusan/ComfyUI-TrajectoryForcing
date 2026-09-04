@@ -141,11 +141,14 @@ def main() -> int:
     save(image_batch_to_uint8(previews), "02-pca")
 
     # --- 4. regions ----------------------------------------------------------
-    regions, region_image, num_regions, region_level = TFRegionMap.execute(
+    regions, region_image, region_level = TFRegionMap.execute(
         levels=levels, level=EDIT_LEVEL, cosine_threshold=0.9, size=512
     )
     save(image_batch_to_uint8(region_image), "03-regions")
     total_tokens = int(np.prod(regions.ids.shape))
+    # The count comes off the RegionMap the node hands over, not off a separate
+    # INT socket -- it was one, and nothing in ComfyUI could receive it.
+    num_regions = regions.num_regions
     check(
         "regions",
         1 < num_regions < total_tokens and region_level == EDIT_LEVEL,
@@ -154,8 +157,8 @@ def main() -> int:
     )
 
     # --- 5. edit -------------------------------------------------------------
-    target, _, _ = TFTokensFromCoords.execute(coords="6,6:9 7,6:9", levels=levels, regions=regions)
-    source, _, _ = TFTokensFromCoords.execute(coords="1,1", levels=other, regions=None)
+    target, _ = TFTokensFromCoords.execute(coords="6,6:9 7,6:9", levels=levels, regions=regions)
+    source, _ = TFTokensFromCoords.execute(coords="1,1", levels=other, regions=None)
     edited, edit_info = TFFeatureEdit.execute(
         levels=levels, level=EDIT_LEVEL, target_tokens=target, source_tokens=source,
         source_mode="region mean", strength=1.0, source_level=EDIT_LEVEL, source_levels=other,
@@ -211,7 +214,7 @@ def main() -> int:
     # be checked against step 6's explicit chain.
     t0 = time.perf_counter()
     sweep_seeds = [SEED, SEED + 1, SEED + 2]
-    report, sheet, picked, arms, spread = TFSweep.execute(
+    report, sheet, picked = TFSweep.execute(
         levels=levels, target_tokens=target, source_tokens=source,
         axis="seed", values=",".join(str(s) for s in sweep_seeds),
         level=EDIT_LEVEL, seed=SEED, strength=1.0, source_mode="region mean",
@@ -230,14 +233,22 @@ def main() -> int:
     # four 512px frames side by side, wider than tall.
     stitched = sheet.shape[0] == 1 and sheet.shape[2] > sheet.shape[1]
     reproduces = np.array_equal(picked.latents, resumed.latents)
-    # The node says so itself when an arm came out identical to its baseline,
-    # rather than this script re-parsing the table's columns to find out.
+    # Read off the node's own conclusions rather than off INT/FLOAT sockets it
+    # no longer has. Both were dropped because nothing in ComfyUI can receive a
+    # measurement, and the per-arm finals the spread is computed from never left
+    # the node anyway -- so recomputing it here is not on offer without paying
+    # for three more resumes. Asserting the node reached the right *conclusion*
+    # is the stronger check in any case, and matches how `every_arm_moved`
+    # already worked.
+    planned_all_arms = f"({len(sweep_seeds)} arms)" in report
+    axis_mattered = "does change the outcome" in report
     every_arm_moved = "changed nothing at all" not in report
     check(
         "sweep",
-        arms == len(sweep_seeds) and reproduces and spread > 0 and every_arm_moved
+        planned_all_arms and reproduces and axis_mattered and every_arm_moved
         and stitched,
-        f"{arms} arms in {time.perf_counter() - t0:.1f}s, spread {spread:.4f}, "
+        f"{len(sweep_seeds)} arms planned: {planned_all_arms}, "
+        f"in {time.perf_counter() - t0:.1f}s; seed changes the outcome: {axis_mattered}, "
         f"every arm moved the final level: {every_arm_moved}, "
         f"sheet {tuple(sheet.shape[1:3])} stitched into one image: {stitched}, "
         f"arm 0 {'reproduces' if reproduces else 'DIVERGES FROM'} the explicit chain",

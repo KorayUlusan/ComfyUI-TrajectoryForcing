@@ -54,11 +54,14 @@ class TFCompareLevels(io.ComfyNode):
                 sheet_layout_input("the per-level heatmaps"),
                 pipeline_input(tooltip="Only needed when 'decode_difference' is on."),
             ],
+            # The tokens-changed total and the peak distance are in the report,
+            # which is what reads them and what TF Save Report archives. They
+            # were sockets too until it was pointed out that nothing can receive
+            # them: a measurement never drives a widget, so ComfyUI has nothing
+            # to suggest and the drag dead-ends. See `CONTRIBUTING.md`.
             outputs=[
                 io.String.Output("report"),
                 io.Image.Output("heatmap", tooltip="One tile per level; brighter is more changed."),
-                io.Int.Output("changed_tokens", tooltip="Total across all levels."),
-                io.Float.Output("max_distance", tooltip="Largest per-token cosine distance."),
             ],
         )
 
@@ -96,6 +99,7 @@ class TFCompareLevels(io.ComfyNode):
             tiles.append(render.caption(render.draw_ticks(tile, distance.shape), name))
 
         total = sum(changed_per_level)
+        lines.append(f"total: {total} tokens changed, peak distance {peak:.4f}")
         if total == 0:
             lines += ["", "Nothing changed. The two trajectories are identical."]
         else:
@@ -120,6 +124,6 @@ class TFCompareLevels(io.ComfyNode):
         report = "\n".join(lines)
         heatmap = render.lay_out(images, sheet_layout)
         return io.NodeOutput(
-            report, heatmap, total, round(peak, 6),
+            report, heatmap,
             ui=node_preview(image=heatmap, text=report),
         )

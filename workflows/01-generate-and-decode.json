@@ -306,31 +306,24 @@
           "links": []
         },
         {
-          "label": "num_levels",
-          "name": "num_levels",
-          "type": "INT",
-          "slot_index": 1,
-          "links": []
-        },
-        {
           "label": "class_id",
           "name": "class_id",
           "type": "INT",
-          "slot_index": 2,
+          "slot_index": 1,
           "links": []
         },
         {
           "label": "class_name",
           "name": "class_name",
           "type": "STRING",
-          "slot_index": 3,
+          "slot_index": 2,
           "links": []
         },
         {
           "label": "seed",
           "name": "seed",
           "type": "INT",
-          "slot_index": 4,
+          "slot_index": 3,
           "links": []
         }
       ],

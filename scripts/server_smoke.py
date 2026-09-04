@@ -201,20 +201,33 @@ def main() -> int:
             print((OUT / "comfyui.log").read_text()[-4000:], flush=True)
             return 1
         missing = EXPECTED_NODES - set(info)
-        types_ok = (
-            info.get("TFGenerate", {}).get("output") == ["TF_LEVELS"]
-            and info.get("TFRegionMap", {}).get("output") == ["TF_REGIONS", "IMAGE", "INT", "INT"]
-            and "TF_PIPELINE" in json.dumps(info.get("TFGenerate", {}).get("input", {}))
-            # the pipeline socket must survive as an optional override, or a
-            # trajectory from TF Load Levels can never be decoded
-            and "pipeline" in info.get("TFDecode", {}).get("input", {}).get("optional", {})
-        )
-        check(
-            "startup",
-            not missing and types_ok,
-            f"{len(EXPECTED_NODES)} nodes registered, custom socket types published"
-            if not missing else f"missing {sorted(missing)}",
-        )
+        # What matters is that the *custom* socket types survive registration --
+        # ComfyUI has to publish TF_LEVELS and TF_REGIONS for any of this to
+        # wire up. The full output list is deliberately not pinned: it was, as
+        # ["TF_REGIONS", "IMAGE", "INT", "INT"], and dropping TF Region Map's
+        # dead `num_regions` socket failed this check with every actual
+        # behaviour still passing. Output arity is the unit suite's job
+        # (TestEveryScalarOutputDrivesAWidget, and the workflow link tests).
+        wrong = []
+        if info.get("TFGenerate", {}).get("output") != ["TF_LEVELS"]:
+            wrong.append("TFGenerate does not output TF_LEVELS")
+        if info.get("TFRegionMap", {}).get("output", [])[:2] != ["TF_REGIONS", "IMAGE"]:
+            wrong.append("TFRegionMap does not lead with TF_REGIONS, IMAGE")
+        if "TF_PIPELINE" not in json.dumps(info.get("TFGenerate", {}).get("input", {})):
+            wrong.append("TFGenerate takes no TF_PIPELINE")
+        # the pipeline socket must survive as an optional override, or a
+        # trajectory from TF Load Levels can never be decoded
+        if "pipeline" not in info.get("TFDecode", {}).get("input", {}).get("optional", {}):
+            wrong.append("TFDecode lost its optional pipeline override")
+        # Say what actually differed. This line used to print the success text
+        # beside [FAIL] whenever the types were wrong but no node was missing,
+        # which is how a stale expectation reads as an unexplained failure.
+        detail = f"{len(EXPECTED_NODES)} nodes registered, custom socket types published"
+        if missing:
+            detail = f"missing {sorted(missing)}"
+        elif wrong:
+            detail = "; ".join(wrong)
+        check("startup", not missing and not wrong, detail)
 
         # --- widget: registered and served -----------------------------------
         served, body = "", ""

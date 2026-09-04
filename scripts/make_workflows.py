@@ -206,14 +206,39 @@ class Graph:
             for index, (title, members, colour) in enumerate(self._group_specs)
         ]
 
+    def _slot(self, origin: int, name) -> int:
+        """Resolve an output *name* to its index in the origin node's schema.
+
+        Links name the output they come from rather than counting to it, for the
+        same reason widget values are set by input id: a position is not stable.
+        Removing an output shifts every later one, and the resulting link lands
+        on the wrong socket silently -- `test_every_link_references_real_nodes_
+        and_slots` compares the origin's output type against the link's, so it
+        only catches the mistake when the two outputs happen to differ in type.
+        TF Region Map carried two adjacent INT outputs until `num_regions` was
+        cut, so wiring the region count into an edit's `level` would have passed
+        every test in the suite and quietly edited the wrong level.
+
+        An index is refused rather than accepted alongside a name: allowing both
+        is how the unstable form creeps back in.
+        """
+        node_type = self.nodes[origin - 1]["type"]
+        available = [out.id for out in describe(node_type).outputs]
+        if not isinstance(name, str):
+            raise TypeError(f"address {node_type}'s output by name, not index {name!r}; "
+                            f"it has {available}")
+        if name not in available:
+            raise KeyError(f"{node_type} has no output {name!r}; it has {available}")
+        return available.index(name)
+
     def add(self, node_type: str, column: int, row: int, title: str = "", **values) -> int:
         """Place a node. `values` sets widget values by input id and wires links.
 
-        A value of `(node_id, output_index)` is a link; anything else is a widget
-        value. Unset widgets keep the schema default. A widget input given a link
-        becomes a connected socket, which is what LiteGraph calls a converted
-        widget -- it keeps its slot in `widgets_values` and gains an entry in
-        `inputs` carrying the widget's name.
+        A value of `(node_id, "output_name")` is a link; anything else is a
+        widget value. Unset widgets keep the schema default. A widget input given
+        a link becomes a connected socket, which is what LiteGraph calls a
+        converted widget -- it keeps its slot in `widgets_values` and gains an
+        entry in `inputs` carrying the widget's name.
         """
         spec = describe(node_type)
         node_id = len(self.nodes) + 1
@@ -232,7 +257,7 @@ class Graph:
 
             link = None
             if linked:
-                origin, slot = value
+                origin, slot = value[0], self._slot(*value)
                 link = len(self.links) + 1
                 self.links.append([link, origin, slot, node_id, len(inputs), input_.io_type])
                 self.nodes[origin - 1]["outputs"][slot]["links"].append(link)
@@ -305,8 +330,15 @@ _UNSET = object()
 
 
 def _is_link(value) -> bool:
-    """`(node_id, output_slot)` is a link; every widget value in these workflows
-    is a scalar or a string, so the shape is unambiguous."""
+    """`(node_id, "output_name")` is a link; every widget value in these
+    workflows is a scalar or a string, so the shape is unambiguous.
+
+    The output name is deliberately not checked here. A tuple whose first
+    element is a node id is a link whatever follows it, so an index written by
+    habit reaches `Graph._slot` and is refused by name -- rather than falling
+    through to `_widget_values`, which would write the tuple itself into
+    `widgets_values` and produce a workflow that loads with nonsense in a knob.
+    """
     return isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], int)
 
 
@@ -493,14 +525,17 @@ steps are things you can *look at*, and in the other workflows, edit.
     cls = g.add("TFImageNetClass", 0, 5, class_name=imagenet_option(213))
     g.group("1 · Load the model", [pipe, cls])
 
-    gen = g.add("TFGenerate", 1, 0, pipeline=(pipe, 0), class_id=(cls, 0), seed=592)
+    gen = g.add("TFGenerate", 1, 0, pipeline=(pipe, "pipeline"), class_id=(cls, "class_id"),
+                seed=592)
     g.group("2 · Sample a trajectory", [gen])
 
-    dec = g.add("TFDecode", 2, 0, levels=(gen, 0), which="all levels")
-    pca = g.add("TFLatentPreview", 2, 6, levels=(gen, 0), which="all levels")
-    info = g.add("TFLevelsInfo", 2, 12, levels=(gen, 0))
-    rgb_view = g.add("PreviewImage", 3, 0, title="Decoded RGB — one per level", images=(dec, 0))
-    pca_view = g.add("PreviewImage", 3, 6, title="Latent PCA — one per level", images=(pca, 0))
+    dec = g.add("TFDecode", 2, 0, levels=(gen, "levels"), which="all levels")
+    pca = g.add("TFLatentPreview", 2, 6, levels=(gen, "levels"), which="all levels")
+    info = g.add("TFLevelsInfo", 2, 12, levels=(gen, "levels"))
+    rgb_view = g.add("PreviewImage", 3, 0, title="Decoded RGB — one per level",
+                     images=(dec, "images"))
+    pca_view = g.add("PreviewImage", 3, 6, title="Latent PCA — one per level",
+                     images=(pca, "images"))
     g.group("3 · Look at every level", [dec, pca, info, rgb_view, pca_view])
     return g
 
@@ -556,19 +591,20 @@ wrong part of the image without complaining.
 
     pipe = g.add("TFLoadPipeline", 0, 0)
     target = g.add("TFGenerate", 1, 0, title="target — the image being edited",
-                   pipeline=(pipe, 0), class_id=213, seed=592)
+                   pipeline=(pipe, "pipeline"), class_id=213, seed=592)
     source = g.add("TFGenerate", 1, 6, title="source — where the new feature comes from",
-                   pipeline=(pipe, 0), class_id=207, seed=592)
+                   pipeline=(pipe, "pipeline"), class_id=207, seed=592)
     g.group("1 · Load, and generate two images", [pipe, target, source])
 
-    regions = g.add("TFRegionMap", 2, 0, levels=(target, 0), level=2, cosine_threshold=0.9)
+    regions = g.add("TFRegionMap", 2, 0, levels=(target, "levels"), level=2,
+                    cosine_threshold=0.9)
     tgt_tokens = g.add(
         "TFTokensFromCoords", 2, 6, title="target region — WHERE the edit lands",
-        coords="7,7", levels=(target, 0), regions=(regions, 0),
+        coords="7,7", levels=(target, "levels"), regions=(regions, "regions"),
     )
     src_tokens = g.add(
         "TFTokensFromCoords", 2, 11, title="source tokens — WHAT gets written there",
-        coords="6,6:9 7,6:9", levels=(source, 0),
+        coords="6,6:9 7,6:9", levels=(source, "levels"),
     )
     g.group("2 · Choose what to edit", [regions, tgt_tokens, src_tokens], colour="#b58b2a")
 
@@ -577,31 +613,35 @@ wrong part of the image without complaining.
     # refused rather than silently landing on the wrong part of the image.
     edit = g.add(
         "TFFeatureEdit", 3, 0,
-        levels=(target, 0), level=(regions, 3), target_tokens=(tgt_tokens, 0),
-        source_tokens=(src_tokens, 0), source_mode="region mean", strength=1.0, source_levels=(source, 0),
+        levels=(target, "levels"), level=(regions, "level"), target_tokens=(tgt_tokens, "tokens"),
+        source_tokens=(src_tokens, "tokens"), source_mode="region mean", strength=1.0,
+        source_levels=(source, "levels"),
     )
     resume = g.add(
         "TFResumeFromLevel", 4, 0,
-        levels=(edit, 0), class_id=-1, seed=592,
+        levels=(edit, "levels"), class_id=-1, seed=592,
     )
     g.group("3 · Apply it, then re-sample the finer levels", [edit, resume], colour="#a1309b")
 
-    after = g.add("TFDecode", 5, 0, title="after", levels=(resume, 0), which="all levels")
-    before = g.add("TFDecode", 5, 6, title="before", levels=(target, 0),
+    after = g.add("TFDecode", 5, 0, title="after", levels=(resume, "levels"), which="all levels")
+    before = g.add("TFDecode", 5, 6, title="before", levels=(target, "levels"),
                    which="final level only")
-    after_view = g.add("PreviewImage", 6, 0, title="EDITED — all four levels", images=(after, 0))
+    after_view = g.add("PreviewImage", 6, 0, title="EDITED — all four levels",
+                       images=(after, "images"))
     before_view = g.add("PreviewImage", 6, 6, title="UNEDITED — for comparison",
-                        images=(before, 0))
+                        images=(before, "images"))
     canvas = g.add("TFLevelCanvas", 5, 10, title="the level you edited, with the selection on it",
-                   levels=(target, 0), level=(regions, 3),
-                   view="latent PCA", regions=(regions, 0), highlight=(tgt_tokens, 0))
-    canvas_view = g.add("PreviewImage", 6, 10, title="what was selected", images=(canvas, 0))
+                   levels=(target, "levels"), level=(regions, "level"),
+                   view="latent PCA", regions=(regions, "regions"),
+                   highlight=(tgt_tokens, "tokens"))
+    canvas_view = g.add("PreviewImage", 6, 10, title="what was selected", images=(canvas, "canvas"))
     g.group("4 · Compare", [after, before, after_view, before_view, canvas, canvas_view],
             colour="#8A8")
 
-    compare = g.add("TFCompareLevels", 5, 21, before=(target, 0), after=(resume, 0), size=512)
+    compare = g.add("TFCompareLevels", 5, 21, before=(target, "levels"),
+                    after=(resume, "levels"), size=512)
     compare_view = g.add("PreviewImage", 6, 21, title="where it changed, per level",
-                         images=(compare, 1))
+                         images=(compare, "heatmap"))
     g.group("5 · Measure it", [compare, compare_view], colour="#88A")
     return g
 
@@ -647,50 +687,53 @@ says whether you painted too thinly (*coverage*) or across too many regions
 
     pipe = g.add("TFLoadPipeline", 0, 0)
     target = g.add("TFGenerate", 1, 0, title="target — the image being edited",
-                   pipeline=(pipe, 0), class_id=213, seed=592)
+                   pipeline=(pipe, "pipeline"), class_id=213, seed=592)
     source = g.add("TFGenerate", 1, 6, title="source — where the new feature comes from",
-                   pipeline=(pipe, 0), class_id=207, seed=592)
+                   pipeline=(pipe, "pipeline"), class_id=207, seed=592)
     g.group("1 · Load, and generate two images", [pipe, target, source])
 
-    regions = g.add("TFRegionMap", 2, 0, levels=(target, 0), level=2, cosine_threshold=0.9)
+    regions = g.add("TFRegionMap", 2, 0, levels=(target, "levels"), level=2,
+                    cosine_threshold=0.9)
     canvas = g.add(
         "TFLevelCanvas", 2, 6, title="the canvas — this is what you paint on",
-        levels=(target, 0), level=(regions, 3), view="latent PCA",
-        draw_grid=True, size=512, regions=(regions, 0),
+        levels=(target, "levels"), level=(regions, "level"), view="latent PCA",
+        draw_grid=True, size=512, regions=(regions, "regions"),
     )
     # Previewed on its own so the first run -- which stops at TF Tokens From
     # Mask, there being nothing painted yet -- still visibly produces the thing
     # you are meant to paint on, instead of looking like it did nothing.
     canvas_view = g.add("PreviewImage", 2, 12, title="run once to see this, then paint",
-                        images=(canvas, 0))
+                        images=(canvas, "canvas"))
     painter = g.add("Painter", 3, 0, title="PAINT HERE, then press Run again",
-                    image=(canvas, 0))
+                    image=(canvas, "canvas"))
     tgt_tokens = g.add(
         "TFTokensFromMask", 4, 0, title="your stroke, snapped to whole regions",
-        mask=(painter, 1), levels=(target, 0), coverage=0.35,
-        regions=(regions, 0), region_overlap=0.3,
+        mask=(painter, "MASK"), levels=(target, "levels"), coverage=0.35,
+        regions=(regions, "regions"), region_overlap=0.3,
     )
     check = g.add("TFTokensPreview", 4, 7, title="what your paint actually selected",
-                  tokens=(tgt_tokens, 0))
-    check_view = g.add("PreviewImage", 4, 11, images=(check, 0))
+                  tokens=(tgt_tokens, "tokens"))
+    check_view = g.add("PreviewImage", 4, 11, images=(check, "image"))
     g.group("2 · Paint the region  ← the two-run step",
             [regions, canvas, canvas_view, painter, tgt_tokens, check, check_view],
             colour="#b58b2a")
 
     src_tokens = g.add("TFTokensFromCoords", 5, 8, title="source tokens — WHAT gets written",
-                       coords="6,6:9 7,6:9", levels=(source, 0))
+                       coords="6,6:9 7,6:9", levels=(source, "levels"))
     edit = g.add(
         "TFFeatureEdit", 5, 0,
-        levels=(target, 0), level=(regions, 3), target_tokens=(tgt_tokens, 0),
-        source_tokens=(src_tokens, 0), source_mode="region mean", strength=1.0, source_levels=(source, 0),
+        levels=(target, "levels"), level=(regions, "level"), target_tokens=(tgt_tokens, "tokens"),
+        source_tokens=(src_tokens, "tokens"), source_mode="region mean", strength=1.0,
+        source_levels=(source, "levels"),
     )
-    resume = g.add("TFResumeFromLevel", 6, 0, levels=(edit, 0),
+    resume = g.add("TFResumeFromLevel", 6, 0, levels=(edit, "levels"),
                    class_id=-1, seed=592)
     g.group("3 · Apply it, then re-sample the finer levels", [src_tokens, edit, resume],
             colour="#a1309b")
 
-    after = g.add("TFDecode", 7, 0, levels=(resume, 0), which="all levels")
-    after_view = g.add("PreviewImage", 8, 0, title="EDITED — all four levels", images=(after, 0))
+    after = g.add("TFDecode", 7, 0, levels=(resume, "levels"), which="all levels")
+    after_view = g.add("PreviewImage", 8, 0, title="EDITED — all four levels",
+                       images=(after, "images"))
     g.group("4 · Result", [after, after_view], colour="#8A8")
     return g
 
@@ -727,30 +770,33 @@ are, then pick coordinates on either side of one.
     )
 
     pipe = g.add("TFLoadPipeline", 0, 0)
-    levels = g.add("TFGenerate", 1, 0, pipeline=(pipe, 0), class_id=213, seed=592)
+    levels = g.add("TFGenerate", 1, 0, pipeline=(pipe, "pipeline"), class_id=213, seed=592)
     g.group("1 · Load and generate", [pipe, levels])
 
-    regions = g.add("TFRegionMap", 2, 0, levels=(levels, 0), level=2, cosine_threshold=0.9)
+    regions = g.add("TFRegionMap", 2, 0, levels=(levels, "levels"), level=2,
+                    cosine_threshold=0.9)
     region_view = g.add("PreviewImage", 2, 6, title="the regions — pick coordinates from this",
-                        images=(regions, 1))
+                        images=(regions, "map"))
     boundary = g.add("TFTokensFromCoords", 3, 0, title="tokens to hand over",
-                     coords="7,7 8,7", levels=(levels, 0))
+                     coords="7,7 8,7", levels=(levels, "levels"))
     receiving = g.add("TFTokensFromCoords", 3, 5, title="one token in the receiving region",
-                      coords="0,0", levels=(levels, 0))
+                      coords="0,0", levels=(levels, "levels"))
     g.group("2 · Find a boundary, name both sides",
             [regions, region_view, boundary, receiving], colour="#b58b2a")
 
     edit = g.add(
         "TFShapeEdit", 4, 0,
-        levels=(levels, 0), level=(regions, 3), regions=(regions, 0),
-        boundary_tokens=(boundary, 0), receiving_tokens=(receiving, 0), strength=1.0,
+        levels=(levels, "levels"), level=(regions, "level"), regions=(regions, "regions"),
+        boundary_tokens=(boundary, "tokens"), receiving_tokens=(receiving, "tokens"),
+        strength=1.0,
     )
-    resume = g.add("TFResumeFromLevel", 5, 0, levels=(edit, 0),
+    resume = g.add("TFResumeFromLevel", 5, 0, levels=(edit, "levels"),
                    class_id=-1, seed=592)
     g.group("3 · Move the boundary, then re-sample", [edit, resume], colour="#a1309b")
 
-    after = g.add("TFDecode", 6, 0, levels=(resume, 0), which="all levels")
-    after_view = g.add("PreviewImage", 7, 0, title="after the shape edit", images=(after, 0))
+    after = g.add("TFDecode", 6, 0, levels=(resume, "levels"), which="all levels")
+    after_view = g.add("PreviewImage", 7, 0, title="after the shape edit",
+                       images=(after, "images"))
     g.group("4 · Result", [after, after_view], colour="#8A8")
     return g
 
@@ -809,18 +855,19 @@ ever differ in two ways at once.
 
     pipe = g.add("TFLoadPipeline", 0, 0)
     target = g.add("TFGenerate", 1, 0, title="target — the image being edited",
-                   pipeline=(pipe, 0), class_id=213, seed=592)
+                   pipeline=(pipe, "pipeline"), class_id=213, seed=592)
     source = g.add("TFGenerate", 1, 6, title="source — where the new feature comes from",
-                   pipeline=(pipe, 0), class_id=207, seed=592)
+                   pipeline=(pipe, "pipeline"), class_id=207, seed=592)
     g.group("1 · Load and generate both trajectories", [pipe, target, source])
 
-    regions = g.add("TFRegionMap", 2, 0, levels=(target, 0), level=2, cosine_threshold=0.9)
+    regions = g.add("TFRegionMap", 2, 0, levels=(target, "levels"), level=2,
+                    cosine_threshold=0.9)
     region_view = g.add("PreviewImage", 2, 6, title="the regions — pick coordinates from this",
-                        images=(regions, 1))
+                        images=(regions, "map"))
     tgt_tokens = g.add("TFTokensFromCoords", 3, 0, title="target region — WHERE the edit lands",
-                       coords="7,7", levels=(target, 0), regions=(regions, 0))
+                       coords="7,7", levels=(target, "levels"), regions=(regions, "regions"))
     src_tokens = g.add("TFTokensFromCoords", 3, 5, title="source tokens — WHAT gets written",
-                       coords="6,6:9", levels=(source, 0))
+                       coords="6,6:9", levels=(source, "levels"))
     g.group("2 · Choose the edit — held fixed across every arm",
             [regions, region_view, tgt_tokens, src_tokens], colour="#b58b2a")
 
@@ -829,24 +876,26 @@ ever differ in two ways at once.
     # another. A level sweep overrides it per arm and says so in the report.
     sweep = g.add(
         "TFSweep", 4, 0, title="TF Sweep Edit — the table is in this node",
-        levels=(target, 0), target_tokens=(tgt_tokens, 0), source_tokens=(src_tokens, 0),
-        source_levels=(source, 0), axis="seed", values="592,593,594,595",
-        level=(regions, 3), seed=592, strength=1.0,
+        levels=(target, "levels"), target_tokens=(tgt_tokens, "tokens"),
+        source_tokens=(src_tokens, "tokens"),
+        source_levels=(source, "levels"), axis="seed", values="592,593,594,595",
+        level=(regions, "level"), seed=592, strength=1.0,
     )
     sheet = g.add("PreviewImage", 5, 0, title="baseline first, then one frame per arm",
-                  images=(sweep, 1))
+                  images=(sweep, "sheet"))
     g.group("3 · Sweep the seed and tabulate", [sweep, sheet], colour="#a1309b")
 
-    compare = g.add("TFCompareLevels", 4, 12, before=(target, 0), after=(sweep, 2), size=512)
+    compare = g.add("TFCompareLevels", 4, 12, before=(target, "levels"),
+                    after=(sweep, "levels"), size=512)
     compare_view = g.add("PreviewImage", 5, 12, title="where the picked arm changed, per level",
-                         images=(compare, 1))
+                         images=(compare, "heatmap"))
     g.group("4 · One arm in detail", [compare, compare_view], colour="#8A8")
 
     # Wired rather than merely mentioned: the table is the output this whole
     # graph exists to produce, and a number that lives only in a browser tab
     # cannot be cited later. Appends, so a session's runs accumulate in one file.
     keep = g.add("TFSaveReport", 4, 20, title="keep the table — output/trajectory_forcing/",
-                 text=(sweep, 0), levels=(sweep, 2), name="sweep", append=True)
+                 text=(sweep, "report"), levels=(sweep, "levels"), name="sweep", append=True)
     g.group("5 · Keep the numbers", [keep], colour="#3f789e")
     return g
 

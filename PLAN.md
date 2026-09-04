@@ -28,7 +28,7 @@ someone using it for a real edit, which is the next thing.
 
 Verification, all reproducible from this repo:
 
-- `pytest tests` — 347 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
+- `pytest tests` — 352 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
   every node's schema and `execute` against a stub pipeline.
 - `slurm/gpu_smoke.sbatch` — the nodes against the real TF-L model. **8/8,
   job 449980**, including two controls: same class + seed reproduces the
@@ -615,6 +615,108 @@ way worth correcting rather than quietly fixing. Alt-click changes the `coords`
 "7,7" in the field instead of a nine-run coordinate list -- the line a writeup
 wants. Genuinely sub-region tokens need `regions` unwired. Stated that way now
 in the node description, both READMEs and the widget's own tooltips.
+
+## Nine outputs nothing could receive (2026-09-03)
+
+Reported as "shift-drag from `max_distance` or `changed_tokens` suggests no
+valid node, and the same on TF Save Report -- what are those outputs for?"
+
+The suggestion list is not arbitrary. It comes from the frontend's
+`extensions/core/slotDefaults.ts`, which skips every input whose type is in
+`ComfyWidgets` (INT, FLOAT, STRING, BOOLEAN, COMBO) unless it is declared
+`forceInput`. The one `forceInput` scalar in all of `comfy_extras` is
+`floats_strength`, type `FLOATS`. So `LiteGraph.slot_types_default_out` has no
+`"INT"` key whatsoever, and every INT/FLOAT drag dead-ends. `PreviewAny` is
+indexed under `"*"` and never matches. STRING works only because
+`TFSaveReport.text` is `force_input=True`.
+
+Taken as a design test -- *an output socket is a promise something can receive
+it* -- the outputs split on a line nobody had drawn on purpose. Of sixteen
+scalar and string outputs, the five shipped workflows wired exactly three:
+`TFImageNetClass.class_id`, `TFRegionMap.level` (six times) and
+`TFSweep.report`. Nine of the rest were measurements: `changed_tokens`,
+`max_distance`, `arms`, `spread`, `num_regions`, three `count`s, `num_levels`.
+Nothing could ever receive one, because **you never drive a knob with a
+measurement** -- and each was already in the node's own body and in the report
+`TF Save Report` archives. All nine are gone; `TF Tokens Combine` traded its
+`count` for an `info` string so the three selection nodes have one shape.
+
+Two things this cost, both worth recording. `gpu_smoke` was a real consumer --
+it asserted on `num_regions`, `arms` and `spread` directly. Two of those got
+*better*: `regions.num_regions` rides on the object the `regions` socket already
+carries. The spread did not: the per-arm finals it is computed from never leave
+the node, so recomputing it independently would mean paying for three more
+resumes, and the check now reads the node's own stated conclusion ("does change
+the outcome") the way `every_arm_moved` already did. And three of the six cuts
+shifted socket indices, `TFRegionMap.level` from 3 to 2 -- six links across the
+workflows, cheap only because `make_workflows.py` regenerates them. That
+generator addressed outputs by hard-coded index; resolving them by name was the
+obvious follow-up, and is the section below.
+
+`TestEveryScalarOutputDrivesAWidget` now holds the line: an INT/FLOAT output
+must name the widget it feeds, and that widget is checked to exist with a
+matching type. Verified to fail on the real bug by putting `changed_tokens`
+back.
+
+**And the smoke script went stale for the fourth time** -- a different way than
+the three the AST test covers. `server_smoke.py` pinned `TFRegionMap`'s output
+list as a literal `["TF_REGIONS", "IMAGE", "INT", "INT"]`, so job 449989 came
+back 12/13 with every actual behaviour passing and only that expectation
+failing. The AST check compares *call sites* against live schemas and cannot see
+a hardcoded literal. Fixed by asserting what the check is for -- that the custom
+socket types survive registration -- rather than the full arity, which the unit
+suite now owns. The failure message was fixed at the same time: it printed the
+success text next to `[FAIL]` whenever the types were wrong but no node was
+missing, which is how a stale expectation reads as an unexplained failure.
+
+Also corrected, in `CONTRIBUTING.md`, `sockets.node_preview` and a test
+docstring: the claim that stock ComfyUI ships no node displaying a STRING,
+"checked against every registered core class". `PreviewAny` does. The reason for
+`node_preview` survives -- a result you have to bolt a second node onto is one
+nobody reads -- but the sentence justifying it did not.
+
+## The generator names its links (2026-09-04)
+
+The follow-up left at the end of the section above, done. `make_workflows.py`
+wired links as `(node_id, integer_slot)`; it now takes `(node_id, "output_name")`
+and resolves the index from the schema, and an integer is **refused** rather than
+accepted alongside a name -- allowing both is how the unstable form creeps back.
+
+The argument for doing it is not the six hand-edits the `num_regions` cut cost.
+It is that nothing would have caught getting one of them wrong.
+`test_every_link_references_real_nodes_and_slots` compares the origin output's
+type against the link's, and the link's type is taken from the *input* -- so it
+separates a `TF_LEVELS` from an `IMAGE` and cannot separate two `INT`s. Until
+`num_regions` was cut, `TFRegionMap` had two adjacent INT outputs, so wiring the
+region count into `TFFeatureEdit.level` would have passed the entire suite and
+produced a workflow that edits level 3 while claiming to edit level 2. That is
+the silent-wrong-level failure `TokenSelection.level` exists to prevent, arriving
+by a route the level check cannot see -- the level is *consistent*, it is just
+the wrong one. The generator's own docstring already says positional drift is the
+bug it exists to prevent; it was only preventing it for widget values, and
+addressing inputs by id in the same function that counted to outputs.
+
+**The refactor came with a proof rather than a test run.** All 84 links across
+the five workflows were rewritten by hand, then the workflows regenerated: the
+output is **byte-identical** to what the indices produced, so every name resolves
+to the slot it replaced. A refactor of this shape either has that property or is
+wrong, and checking it costs one `diff -r`.
+
+`TestTheWorkflowGeneratorNamesTheOutputsItWires` holds the line, reading the
+builders with `ast` the way `TestTheSmokeScriptsCallNodesCorrectly` reads
+gpu_smoke's call sites. It needs no ComfyUI, because every link origin in these
+workflows is one of this extension's own nodes -- `PreviewImage` has no outputs
+and `Painter` is only ever an origin for `MASK`, which it names. Scoping the
+variable map per builder function is not tidiness: `edit` is a TF Feature Edit in
+workflow 02 and a TF Shape Edit in 04, and one map across the file would check
+half the links against the wrong schema and pass.
+
+Both layers were verified to fail on the real bug, not assumed to: reverting one
+link to `(regions, 3)` fails `test_no_link_counts_to_a_slot` and raises
+`TypeError` from the generator; naming the cut `num_regions` fails
+`test_every_named_output_exists_on_the_node_it_comes_from` and raises `KeyError`.
+352 tests, ruff clean. No GPU job was needed -- the generator runs on the login
+node under `--cpu`, and nothing about node behaviour changed.
 
 ## Next
 
