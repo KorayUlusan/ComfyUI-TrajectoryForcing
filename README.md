@@ -249,28 +249,49 @@ Your `.env` and the auto-fetched `TrajectoryForcing/` both live inside the
 extension directory, so keep a copy of `.env` if you are about to remove and
 reinstall rather than update in place.
 
+To see whether there is anything to update at all — the installed version
+against the newest published one:
+
+```bash
+grep '^version' pyproject.toml
+curl -s https://api.comfy.org/nodes/comfyui-trajectoryforcing/versions \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['version'])"
+```
+
 <details>
 <summary>Let a coding agent do it</summary>
 
 ```text
-Update the ComfyUI node pack "Trajectory Forcing" on this machine.
+Update the ComfyUI node pack "Trajectory Forcing" on this machine, if there is
+anything to update.
 
   repo:        https://github.com/KorayUlusan/ComfyUI-TrajectoryForcing
   registry id: comfyui-trajectoryforcing
 
-Find the existing install first and tell me where it is. Run `comfy node update`
-with --mode remote, and run `comfy` with no virtualenv active.
+First find the existing install and tell me where it is. Then compare the
+version in its pyproject.toml against the newest at
+https://api.comfy.org/nodes/comfyui-trajectoryforcing/versions
 
-Afterwards run `python -m tf_nodes.doctor` from the extension directory, with the
-venv that runs ComfyUI, and show me the output. Two rows matter:
-- TrajectoryForcing: if it names a commit different from the pin, say so and ask
-  me before deleting the checkout to re-fetch it.
-- jax stack / torch: if env/requirements.txt changed in this update, say so and
-  ask before rebuilding the venv. setup.sh will not touch an existing one.
+If they already match, say "already on <version>, nothing to do" and stop. Do
+not update, re-fetch, rebuild, or tidy anything. Being already current is the
+expected answer most of the time and is a complete, successful result.
 
-Do not delete or rebuild anything without asking. Do not start ComfyUI, run a
-graph, or download weights. Back up .env before anything that replaces the
-extension directory.
+If there is a newer version: back up .env, note the current TF_REPO_COMMIT and
+env/requirements.txt so you can tell what changed, then run `comfy node update`
+with --mode remote and `comfy` run with no virtualenv active.
+
+Afterwards run `python -m tf_nodes.doctor` from the extension directory, using
+the venv that runs ComfyUI, and show me the output. Read it as a report, not a
+to-do list: rows marked "note" are usually normal, and the tool says so.
+Two things need me:
+- TrajectoryForcing naming a commit different from the pin. Ask before deleting
+  the checkout to re-fetch it.
+- env/requirements.txt having changed. Ask before rebuilding the venv; setup.sh
+  will not touch an existing one.
+
+An update that reports no changes is finished, not stuck. Do not delete or
+rebuild anything without asking, do not start ComfyUI, run a graph, or download
+weights.
 ```
 </details>
 
