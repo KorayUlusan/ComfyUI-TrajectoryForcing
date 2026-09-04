@@ -166,12 +166,21 @@ def configure_jax_env() -> list[str]:
             "XLA memory settings may not apply. Launch ComfyUI via run_comfyui.sh."
         )
 
+    # Inside the checkout when there is one, beside the extension when there is
+    # not. The cache is a convenience, so it must not be the reason the XLA
+    # memory settings -- which are not a convenience -- go unset: locating the
+    # checkout can require a network fetch, and this runs at ComfyUI startup.
+    try:
+        cache_dir = tf_repo() / ".jax_cache"
+    except Exception:  # noqa: BLE001 - health.py reports it; this just needs a path
+        cache_dir = Path(__file__).resolve().parent.parent / ".jax_cache"
+
     defaults = {
         # Grow VRAM on demand instead of claiming the whole card up front, so
         # comfy.model_management still has room for the torch models it juggles.
         "XLA_PYTHON_CLIENT_PREALLOCATE": "false",
         # Persist XLA compiles, so a ComfyUI restart does not re-pay JIT time.
-        "JAX_COMPILATION_CACHE_DIR": str(tf_repo() / ".jax_cache"),
+        "JAX_COMPILATION_CACHE_DIR": str(cache_dir),
     }
     # A hard ceiling on JAX's share is only meaningful together with
     # preallocation -- MEM_FRACTION sizes the up-front block and does nothing
@@ -186,5 +195,12 @@ def configure_jax_env() -> list[str]:
         if not os.environ.get(key):
             os.environ[key] = value
             applied.append(key)
-    os.makedirs(os.environ["JAX_COMPILATION_CACHE_DIR"], exist_ok=True)
+    try:
+        os.makedirs(os.environ["JAX_COMPILATION_CACHE_DIR"], exist_ok=True)
+    except OSError:
+        # A read-only custom_nodes/ is a real deployment (containers, shared
+        # installs). Losing the compile cache costs JIT time on every start;
+        # raising here would cost the user every node in the pack.
+        applied = [k for k in applied if k != "JAX_COMPILATION_CACHE_DIR"]
+        del os.environ["JAX_COMPILATION_CACHE_DIR"]
     return applied

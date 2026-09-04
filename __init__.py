@@ -15,8 +15,8 @@ import logging
 
 from comfy_api.latest import ComfyExtension, io
 
-from .tf_nodes import nodes
-from .tf_nodes.locate import register_model_folder, tf_repo
+from .tf_nodes import health, nodes
+from .tf_nodes.locate import register_model_folder
 from .tf_nodes.tf_import import configure_jax_env
 
 log = logging.getLogger(__name__)
@@ -31,12 +31,20 @@ WEB_DIRECTORY = "./web"
 
 class TrajectoryForcingExtension(ComfyExtension):
     async def on_load(self) -> None:
-        repo = tf_repo()
+        # Nothing in here may raise. An exception out of on_load takes the whole
+        # extension with it: all 21 nodes disappear and ComfyUI-Manager reports
+        # `IMPORT FAILED` with no cause, while the actual explanation goes to a
+        # server console that someone driving a browser never reads. Locating
+        # the checkout can involve a network fetch, so it is the most likely
+        # thing here to fail and the least likely to be the user's fault --
+        # which is exactly the wrong combination for a hard failure.
+        report = health.report_at_startup()
+
         applied = configure_jax_env()
         models = register_model_folder()
         log.info(
             "TrajectoryForcing: repo=%s models=%s jax env set: %s",
-            repo, models, ", ".join(applied) or "nothing (already exported)",
+            report.repo, models, ", ".join(applied) or "nothing (already exported)",
         )
 
     async def get_node_list(self) -> list[type[io.ComfyNode]]:

@@ -70,3 +70,7 @@ ENV/
 # Editor / OS
 .DS_Store
 *.tmp
+
+# Left by install.py when it declines to touch the environment; read back at
+# startup by tf_nodes/health.py. Per-install state, never committed.
+/SETUP-REQUIRED.txt

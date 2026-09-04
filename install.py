@@ -177,6 +177,31 @@ def say(*lines: str) -> None:
     print("\n".join(lines), flush=True)
 
 
+def _leave_note(text: str) -> None:
+    """Record a decision for the next ComfyUI start to repeat.
+
+    Imported here rather than at module scope: `tf_nodes.health` is cheap, but
+    this script runs under someone else's interpreter during a Manager install
+    and must not fail on an import. If it cannot leave the note, the printed
+    message above is still correct and the install still succeeded.
+    """
+    try:
+        from tf_nodes.health import write_setup_marker
+
+        write_setup_marker(text)
+    except Exception:  # noqa: BLE001 - a missing note is not worth failing an install
+        pass
+
+
+def _clear_note() -> None:
+    try:
+        from tf_nodes.health import clear_setup_marker
+
+        clear_setup_marker()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main() -> int:
     if os.environ.get("TF_NO_AUTO_DEPS", "").strip():
         say("[TrajectoryForcing] TF_NO_AUTO_DEPS is set; not touching this environment.")
@@ -206,10 +231,21 @@ def main() -> int:
             "=" * 72,
             "",
         )
+        # ComfyUI Manager runs this during install, where its output is collapsed
+        # by default and scrolls away. Leave the decision on disk so the next
+        # ComfyUI start can repeat it, in the log the user will actually be
+        # reading by then.
+        _leave_note(
+            f"{plan.reason}\n"
+            "The nodes are installed but the model stack is not. Run "
+            "`bash env/setup.sh` from this directory and start ComfyUI from the "
+            "venv it builds."
+        )
         return 0
 
     if not plan.install:
         say(f"[TrajectoryForcing] {plan.reason} Nothing to do.")
+        _clear_note()
         return 0
 
     say(
@@ -236,10 +272,15 @@ def main() -> int:
             "=" * 72,
             "",
         )
+        _leave_note(
+            "Installing the JAX stack failed partway through. Nothing was removed. "
+            "Run `bash env/setup.sh` from this directory to build a separate venv."
+        )
         # Deliberately 0: the node itself unpacked fine, and reporting the whole
         # install as failed would send people looking for a broken download.
         return 0
 
+    _clear_note()
     say("", "[TrajectoryForcing] Done. Restart ComfyUI to load the nodes.", "")
     return 0
 

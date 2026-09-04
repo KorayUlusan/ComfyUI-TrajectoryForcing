@@ -95,11 +95,29 @@ def check_runtime_deps() -> None:
     )
 
 
+def check_startup_problems() -> None:
+    """Fail with the diagnosis made at startup, not with its downstream symptom.
+
+    `on_load` records rather than raises, so a missing checkout no longer takes
+    the extension down. The cost of that is a node which would otherwise have
+    failed at import now failing here -- and it should fail saying the thing
+    startup already worked out, rather than with whatever error the absence
+    eventually causes several frames inside TrajectoryForcing.
+    """
+    from .health import blocking_problem
+
+    problem = blocking_problem()
+    if problem is None:
+        return
+    raise RuntimeError(f"{problem.title}\n\n{problem.detail}\n\n-> {problem.fix}")
+
+
 class TFPipeline:
     """One loaded TrajectoryForcing model, shared by every node that references it."""
 
     def __init__(self, config_name: str, checkpoint_name: str):
         check_runtime_deps()
+        check_startup_problems()
         self.config_name = config_name
         self.checkpoint_name = checkpoint_name
         self.checkpoint_path = resolve_checkpoint(checkpoint_name)
