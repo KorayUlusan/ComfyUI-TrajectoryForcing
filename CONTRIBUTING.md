@@ -23,7 +23,7 @@ tests/                  pytest; no GPU needed
 web/                    the one piece of frontend code
 .env.example            every environment variable, with its default
 .comfyignore            what the registry archive leaves out
-.github/workflows/      tests on push; publish present but not enabled
+.github/workflows/      tests on push; publish on a version bump
 ```
 
 `data.py`, `tokens.py` and `render.py` import neither ComfyUI nor JAX, so the edit
@@ -329,11 +329,11 @@ implying it was verified.
 
 ## Releasing
 
-`.github/workflows/publish.yml` publishes to the Comfy Registry, and it is not
-enabled. It carries a `workflow_dispatch` trigger only, so nothing you push cuts a
-release. Its header says how to turn the automatic trigger on. The registry
-refuses to re-publish an existing version, so the `version` bump in
-`pyproject.toml` is the real release switch.
+`.github/workflows/publish.yml` publishes to the Comfy Registry. It fires on a
+push to main that touches `pyproject.toml`, and nothing else, so the `version`
+bump there is the release switch. The registry refuses to re-publish an existing
+version, which makes a stray push harmless. There is also a `workflow_dispatch`
+trigger for publishing by hand.
 
 Nothing publishes unless the tests pass. `publish.yml` calls `tests.yml` as a
 reusable workflow and the publish job `needs:` it. The relative path matters,

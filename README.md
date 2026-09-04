@@ -38,8 +38,6 @@ is a node graph.
 > New to ComfyUI? [**docs/GETTING-STARTED.md**](docs/GETTING-STARTED.md) assumes
 > nothing and gets you to your first edit.
 
----
-
 ## Install
 
 > [!IMPORTANT]
@@ -163,8 +161,6 @@ Weights, both resolved on first use:
 | RAE decoder | `TrajectoryForcing/checkpoints/rae/`, reused if present |
 </details>
 
----
-
 ## Workflows
 
 Five examples, each self-documenting on the canvas. Walkthrough:
@@ -177,8 +173,6 @@ Five examples, each self-documenting on the canvas. Walkthrough:
 | `03-feature-edit-painter` | the same, with a brush | two runs by design |
 | `04-shape-edit` | move a region's boundary | ✅ |
 | `05-sweep-seeds` | one edit across four seeds, tabulated | ✅ |
-
----
 
 ## Nodes
 
@@ -299,8 +293,6 @@ refuse it at a different one. Every level shares the same token grid, so without
 that check the edit lands on the wrong region and nothing says so.
 </details>
 
----
-
 ## Troubleshooting
 
 <details>
@@ -369,31 +361,19 @@ Three quick ones. `Could not find the TrajectoryForcing checkout`: set `TF_REPO`
 machine. `Address already in use`: `ss -ltnp | grep 8188` names the process.
 </details>
 
----
 
-## Not here
-
-TF-2.0 (text conditioning) has no trained checkpoints yet, so a `TF Text Encode`
-node would have nothing to load against. It is planned alongside the TF-2.0 work
-itself. Trajectory Dreamer, the 3D work, is a separate project.
-
-## Relationship to Trajectory Forcing
-
-These nodes are built in collaboration with the Trajectory Forcing authors, as
-part of ongoing joint work towards TF-2.0. They are **not part of the ECCV 2026
-paper and I am not an author on it**. The paper is
-[Kocabas et al.](https://mervekocabas.github.io/TrajectoryForcing/), and the model
-code is imported from
-[their repository](https://github.com/mervekocabas/TrajectoryForcing) rather than
-vendored here.
-
-Bugs in the nodes are mine. Please report them here rather than upstream.
 
 ## Contributing
+
+Bugs in these nodes are related to this repository, not TrajectoryForcing. 
+Please report them here.
 
 Architecture, tests and sharp edges: [**CONTRIBUTING.md**](CONTRIBUTING.md).
 
 ## Citation
+
+These nodes were built in collaboration with the Trajectory Forcing authors.
+If you find this work useful, please consider citing:
 
 ```bib
 @Inproceedings{kocabas2026trajectoryforcing,

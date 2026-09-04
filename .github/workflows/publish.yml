@@ -1,32 +1,25 @@
 name: publish to comfy registry
 
-# ============================================================================
-# NOT ENABLED YET. This file sits here ready and does nothing on its own.
+# The release switch is `version` in pyproject.toml, not this file. A push to
+# main that changes that file publishes that version, which is why the trigger
+# is scoped to the one path rather than to the whole branch: ordinary commits
+# do not reach the registry. The registry also refuses to overwrite a version
+# that already exists, so a push that leaves the number alone is a no-op even
+# if the path filter is somehow satisfied.
 #
-# As written it has only a `workflow_dispatch` trigger, so it never fires by
-# itself -- publishing takes a deliberate click on Actions -> "publish to comfy
-# registry" -> Run workflow. Nothing you push can trigger a release.
+# Publishing by hand is still possible from Actions -> "publish to comfy
+# registry" -> Run workflow.
 #
-# To turn on automatic publishing later:
-#
-#   1. Confirm the repository secret REGISTRY_ACCESS_TOKEN exists
-#      (Settings -> Secrets and variables -> Actions). It already does.
-#   2. Confirm `version` in pyproject.toml is what you want published, and
-#      that `[tool.comfy].PublisherId` matches your registry publisher.
-#   3. Uncomment the `push:` block below. From then on, every push to main that
-#      changes pyproject.toml publishes that version -- which is why the trigger
-#      is scoped to that one file rather than to the branch.
-#
-# The registry rejects a re-publish of a version that already exists, so the
-# version bump in pyproject.toml is the actual release switch.
-# ============================================================================
+# Needs the repository secret REGISTRY_ACCESS_TOKEN (Settings -> Secrets and
+# variables -> Actions) and a `[tool.comfy].PublisherId` matching the registry
+# publisher.
 
 on:
   workflow_dispatch:
 
-  # push:
-  #   branches: [main]
-  #   paths: [pyproject.toml]
+  push:
+    branches: [main]
+    paths: [pyproject.toml]
 
 jobs:
   # The whole of tests.yml -- ruff plus the 385-test suite -- called as a
