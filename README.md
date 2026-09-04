@@ -41,12 +41,17 @@ is a node graph.
 ## Install
 
 > [!IMPORTANT]
-> This extension needs its own Python environment. It runs a JAX model inside the
-> ComfyUI process, and TrajectoryForcing's JAX stack coexists with ComfyUI's torch
-> at exactly one torch version. `requirements.txt` is empty on purpose, so that
-> installing through ComfyUI Manager cannot rewrite the torch your other nodes
-> depend on. A Manager install registers the nodes and then stops at *TF Load
-> Pipeline* with the setup command.
+> This extension usually needs its own Python environment. It runs a JAX model
+> inside the ComfyUI process, and TrajectoryForcing's JAX stack only coexists
+> with ComfyUI's torch on CUDA 12 at torch 2.8 or above. `requirements.txt` is
+> empty on purpose, so that a ComfyUI Manager install cannot rewrite the torch
+> your other nodes depend on.
+>
+> If you install through the Manager, `install.py` checks the torch you already
+> have. On a match it adds the JAX stack and nothing else, and you are done. On
+> anything else it changes nothing and prints why, and the route below is the
+> answer. Most current ComfyUI builds ship CUDA 13, which `jax 0.4.36` cannot
+> use, so expect to need this.
 
 ```bash
 git clone https://github.com/comfyanonymous/ComfyUI ~/ComfyUI

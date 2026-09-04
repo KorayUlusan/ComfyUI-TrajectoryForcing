@@ -23,6 +23,7 @@ tests/                  pytest; no GPU needed
 web/                    the one piece of frontend code
 .env.example            every environment variable, with its default
 .comfyignore            what the registry archive leaves out
+install.py              the Manager hook; the only code that touches a user's venv
 .github/workflows/      tests on push; publish on a version bump
 ```
 
@@ -339,6 +340,17 @@ Nothing publishes unless the tests pass. `publish.yml` calls `tests.yml` as a
 reusable workflow and the publish job `needs:` it. The relative path matters,
 because it runs the tests from the commit being published, which a `workflow_run`
 trigger could not guarantee.
+
+`install.py` is the riskiest file here, because ComfyUI Manager runs it with the
+user's ComfyUI python and it is the only thing in the repo that installs
+packages into an environment we do not own. It may only ever add what is
+missing. Never upgrade, never downgrade, never touch torch: someone whose
+ComfyUI works before installing this must still have one afterwards. Adding JAX
+on top of torch was checked on an H100 against a JAX-first venv, both passing
+the same five criteria with no `nvidia-*` wheel moving; before widening
+`MIN_TORCH` or `CUDA_MAJOR`, run that comparison again rather than reasoning
+about it. The pins are asserted against `env/requirements.txt` by
+`tests/test_install.py`, which is what stops the two drifting.
 
 That green tick covers lint and the CPU suite. It does not mean the GPU smoke
 tests passed. Run `gpu_smoke` and `server_smoke` before bumping the version, and

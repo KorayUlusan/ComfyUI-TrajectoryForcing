@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-trajectoryforcing"
 description = "Trajectory Forcing's coarse-to-fine generation and interactive latent-token editing as ComfyUI nodes."
-version = "0.1.0"
+version = "0.1.1"
 license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.11"
