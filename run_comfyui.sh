@@ -71,7 +71,15 @@ fi
 
 export HF_HOME="${HF_HOME:-$WORK/.cache/huggingface}"
 export TORCH_HOME="${TORCH_HOME:-$WORK/.cache/torch}"
-export TF_REPO="${TF_REPO:-$(cd "$EXT_DIR/.." && pwd)/TrajectoryForcing}"
+# Only exported when it exists. Pointing TF_REPO at a directory that is not
+# there is worse than leaving it unset: locate.py then lists it as a candidate
+# it tried, and this script printed it as though it were the answer while the
+# extension was quietly using its own fetched checkout somewhere else.
+if [[ -n "${TF_REPO:-}" ]]; then
+  export TF_REPO
+elif [[ -d "$(cd "$EXT_DIR/.." && pwd)/TrajectoryForcing" ]]; then
+  export TF_REPO="$(cd "$EXT_DIR/.." && pwd)/TrajectoryForcing"
+fi
 export no_proxy="localhost,127.0.0.1"
 export NO_PROXY="$no_proxy"
 
@@ -150,7 +158,7 @@ SERVER_LOG="$LOG_DIR/comfyui-$(date +%Y%m%d-%H%M%S)-$$.log"
 # the logging added to diagnose a silent failure caused one.
 prune_logs "comfyui"
 
-echo "TrajectoryForcing repo: $TF_REPO"
+echo "TrajectoryForcing repo: ${TF_REPO:-<resolved by the extension at startup>}"
 echo "ComfyUI on port $PORT; the first TF Load Pipeline warms up for 1-2 minutes."
 echo "server log: $SERVER_LOG"
 cd "$COMFY_DIR"

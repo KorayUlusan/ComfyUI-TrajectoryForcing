@@ -150,7 +150,11 @@ class TestTheInstallerNoteOutlivesTheInstaller:
     """install.py runs in another process, under collapsed output, once."""
 
     def test_a_note_is_read_back_as_a_problem(self, monkeypatch, tmp_path):
+        # The stack has to still be missing, or the note is expired as stale --
+        # see TestTheInstallerNoteExpires. Reading it back is only meaningful
+        # while what it says is true.
         working_checkout(monkeypatch, tmp_path)
+        monkeypatch.setattr(health, "missing_runtime_deps", lambda: ["jax"])
         health.write_setup_marker("torch 2.14.0+cpu is a CPU build.")
         problem = next(
             (p for p in health.collect().problems if "installer left a note" in p.title), None
@@ -160,6 +164,7 @@ class TestTheInstallerNoteOutlivesTheInstaller:
 
     def test_clearing_it_removes_the_problem(self, monkeypatch, tmp_path):
         working_checkout(monkeypatch, tmp_path)
+        monkeypatch.setattr(health, "missing_runtime_deps", lambda: ["jax"])
         health.write_setup_marker("something")
         health.clear_setup_marker()
         assert not any("installer left a note" in p.title for p in health.collect().problems)
@@ -258,3 +263,54 @@ class TestASecondCopyIsNoticed:
         monkeypatch.setattr(health, "missing_runtime_deps", lambda: [])
         health.report_at_startup()
         assert health.blocking_problem() is None
+
+
+class TestTheInstallerNoteExpires:
+    """The note is written in one environment and read in another.
+
+    install.py runs under whichever interpreter ComfyUI-Manager is using --
+    on the documented route, the workspace venv, which deliberately has no
+    CUDA-12 torch. The server then runs from the venv env/setup.sh built, which
+    has everything. So a note saying "the model stack is not installed" gets
+    read back somewhere it is plainly false, and a Manager *update* re-runs
+    install.py and writes a fresh one after setup.sh has already cleaned up.
+
+    Reported from a real start: the banner announced a missing model stack while
+    ComfyUI was running on torch 2.8.0+cu128 with jax present.
+    """
+
+    def test_a_note_is_dropped_once_the_stack_is_present(self, monkeypatch, tmp_path):
+        working_checkout(monkeypatch, tmp_path)
+        monkeypatch.setattr(health, "missing_runtime_deps", lambda: [])
+        health.write_setup_marker("torch 2.14.0+cu130 is built for CUDA 13.0")
+
+        report = health.collect()
+
+        assert not health.SETUP_MARKER.exists(), "the stale note was left on disk"
+        assert not any("installer left a note" in p.title for p in report.problems)
+
+    def test_a_note_survives_while_it_is_still_true(self, monkeypatch, tmp_path):
+        """The whole point of the note is the case where the stack is missing."""
+        working_checkout(monkeypatch, tmp_path)
+        monkeypatch.setattr(health, "missing_runtime_deps", lambda: ["jax"])
+        health.write_setup_marker("still true")
+
+        report = health.collect()
+
+        assert health.SETUP_MARKER.exists()
+        assert any("installer left a note" in p.title for p in report.problems)
+
+    def test_a_note_survives_when_the_checkout_is_missing(self, monkeypatch):
+        """Half an install is not an install; do not declare it resolved."""
+        break_checkout(monkeypatch)
+        monkeypatch.setattr(health, "missing_runtime_deps", lambda: [])
+        health.write_setup_marker("still worth reading")
+
+        health.collect()
+
+        assert health.SETUP_MARKER.exists()
+
+    def test_expiring_is_safe_when_there_is_no_note(self, monkeypatch, tmp_path):
+        working_checkout(monkeypatch, tmp_path)
+        monkeypatch.setattr(health, "missing_runtime_deps", lambda: [])
+        assert health.collect().ok

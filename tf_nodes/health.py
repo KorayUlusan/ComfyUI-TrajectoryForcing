@@ -181,12 +181,42 @@ def _duplicate_install_problem() -> Problem | None:
     )
 
 
+def _expire_stale_marker(report: Report) -> None:
+    """Drop the installer's note once it has stopped being true.
+
+    install.py writes it under whichever interpreter ComfyUI-Manager happens to
+    be using, which on the documented route is the workspace venv -- not the one
+    that ends up running the model. So the note is environment-agnostic while
+    the thing it describes is environment-specific, and it gets read back in an
+    environment where it is simply false. A ComfyUI Manager *update* re-runs
+    install.py, so it also reappears after env/setup.sh has already removed it.
+
+    Rather than chase every path that can write one, expire it on the only
+    condition that matters: the note says the model stack is missing, so if the
+    stack is here, the note is wrong. Reported live, at startup, in the
+    environment that can actually answer the question.
+    """
+    if not SETUP_MARKER.exists():
+        return
+    if report.repo is None or missing_runtime_deps():
+        return                      # still true; leave it alone
+    clear_setup_marker()
+    log.info(
+        "TrajectoryForcing: removed a stale %s -- it said the model stack was "
+        "missing, and it is not.", SETUP_MARKER.name,
+    )
+
+
 def collect() -> Report:
     """Everything wrong with this install. Never raises."""
     report = Report()
+    # Order matters: the checkout and dependency probes fill in what
+    # _expire_stale_marker needs to judge the note.
+    checkout, dependency = _checkout_problem(report), _dependency_problem()
+    _expire_stale_marker(report)
     for problem in (
-        _checkout_problem(report),
-        _dependency_problem(),
+        checkout,
+        dependency,
         _duplicate_install_problem(),
         _setup_marker_problem(),
     ):
