@@ -114,36 +114,51 @@ class TestTheEnvironmentIsCheckedBeforeTF:
     install. So the nodes register and the missing half is noticed here, and the
     error has to name the command that fixes it rather than surfacing as a
     ModuleNotFoundError from inside TrajectoryForcing's own code.
+
+    Every test here stubs RUNTIME_DEPS with stdlib names. An earlier version
+    called `check_runtime_deps()` against the real list and passed locally, then
+    failed in CI -- which installs no JAX, precisely because that is the
+    environment the check exists for. A test of the missing-dependency path must
+    not itself depend on the dependency being present.
     """
 
-    def test_it_passes_in_a_working_environment(self):
-        from tf_nodes.pipeline import check_runtime_deps
-
-        check_runtime_deps()
-
-    def test_a_missing_dependency_names_the_fix(self, monkeypatch):
+    def test_it_passes_when_everything_is_present(self, monkeypatch):
         import tf_nodes.pipeline as pipeline
 
-        monkeypatch.setattr(pipeline, "RUNTIME_DEPS", ("jax", "definitely_not_installed_xyz"))
+        monkeypatch.setattr(pipeline, "RUNTIME_DEPS", ("json", "colorsys"))
+        pipeline.check_runtime_deps()
+
+    def test_it_names_only_what_is_missing(self, monkeypatch):
+        import tf_nodes.pipeline as pipeline
+
+        monkeypatch.setattr(pipeline, "RUNTIME_DEPS", ("json", "definitely_not_installed_xyz"))
         with pytest.raises(ImportError) as caught:
             pipeline.check_runtime_deps()
         message = str(caught.value)
-        assert "definitely_not_installed_xyz" in message
         assert "bash env/setup.sh" in message, "the error must carry the command that fixes it"
-        assert "jax" not in message.split("needs")[1].split(",")[0], (
-            "it should name only what is actually missing")
+        listed = message.split("needs", 1)[1].split(", which", 1)[0]
+        assert "definitely_not_installed_xyz" in listed
+        assert "json" not in listed, f"named a package that is installed: {listed!r}"
 
-    def test_it_does_not_import_jax_to_find_out(self, monkeypatch):
+    def test_it_does_not_import_to_find_out(self, monkeypatch):
         # Importing jax initialises its GPU backend, which configure_jax_env has
         # to run before and which cannot be undone in a live process. find_spec
-        # answers the question without that.
+        # answers the question without that. Checked with a stdlib module that is
+        # present but not already imported, so it holds with or without jax.
         import sys
 
         import tf_nodes.pipeline as pipeline
 
-        monkeypatch.delitem(sys.modules, "jax", raising=False)
+        monkeypatch.delitem(sys.modules, "colorsys", raising=False)
+        monkeypatch.setattr(pipeline, "RUNTIME_DEPS", ("colorsys",))
         pipeline.check_runtime_deps()
-        assert "jax" not in sys.modules, "check_runtime_deps imported jax"
+        assert "colorsys" not in sys.modules, "check_runtime_deps imported instead of probing"
+
+    def test_the_real_list_covers_the_jax_stack(self):
+        # The stubs above say nothing about what is actually checked.
+        from tf_nodes.pipeline import RUNTIME_DEPS
+
+        assert "jax" in RUNTIME_DEPS and "flax" in RUNTIME_DEPS, RUNTIME_DEPS
 
 
 class TestRequirementsCannotBreakSomeoneElsesInstall:

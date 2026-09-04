@@ -57,5 +57,31 @@ jobs:
           pip install -r ComfyUI/requirements.txt
           pip install pytest
 
+      # `tests/conftest.py` finds ComfyUI by walking up from the extension, which
+      # resolves in a normal side-by-side checkout and lands one level too high
+      # on a runner ($GITHUB_WORKSPACE is itself nested). Without this the whole
+      # `requires_comfy` half of the suite -- every node schema and execute test,
+      # ~200 of them -- skips, pytest finishes in three seconds, and CI goes green
+      # having checked almost nothing. Naming the path removes the guesswork.
+      - name: Check ComfyUI is where the tests expect
+        env:
+          COMFYUI_ROOT: ${{ github.workspace }}/ComfyUI
+        run: |
+          python - <<'EOF'
+          import os, sys
+          sys.path.insert(0, "ComfyUI-TrajectoryForcing/tests")
+          import conftest
+          if conftest.COMFY_ROOT is None:
+              sys.exit(
+                  "conftest could not find ComfyUI, so the suite would silently skip "
+                  f"every test that needs it. COMFYUI_ROOT={os.environ.get('COMFYUI_ROOT')!r}"
+              )
+          print("ComfyUI found at", conftest.COMFY_ROOT)
+          EOF
+
       - name: pytest
-        run: pytest ComfyUI-TrajectoryForcing/tests -q
+        env:
+          COMFYUI_ROOT: ${{ github.workspace }}/ComfyUI
+        # -p no:cacheprovider: nothing to reuse on a fresh runner.
+        # --durations: the fast-run symptom above is worth seeing at a glance.
+        run: pytest ComfyUI-TrajectoryForcing/tests -q -p no:cacheprovider --durations=5
