@@ -8,7 +8,7 @@ requires-python = ">=3.11"
 # Deliberately empty. The heavy dependencies (JAX, flax, torch, transformers)
 # belong to TrajectoryForcing and are pinned there; installing them from here
 # would let a `pip install` in the ComfyUI venv silently move a pin the model
-# checkpoints were trained against. See requirements.txt for what the venv needs
+# checkpoints were trained against. See env/requirements.txt for what the venv needs
 # and env/setup.sh for how it is built.
 dependencies = []
 
@@ -18,7 +18,9 @@ Repository = "https://github.com/korayulusan/ComfyUI-TrajectoryForcing"
 [tool.comfy]
 PublisherId = "korayulusan"
 DisplayName = "Trajectory Forcing"
-Icon = ""
+# Square PNG, served from the repo -- resolves once the repo is public.
+# Source of truth is docs/img/logo/favicon.svg; see CONTRIBUTING.md.
+Icon = "https://raw.githubusercontent.com/KorayUlusan/ComfyUI-TrajectoryForcing/main/docs/img/logo/icon.png"
 
 [tool.ruff]
 line-length = 110

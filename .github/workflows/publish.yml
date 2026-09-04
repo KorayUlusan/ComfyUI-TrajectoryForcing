@@ -1,0 +1,58 @@
+name: publish to comfy registry
+
+# ============================================================================
+# NOT ENABLED YET. This file sits here ready and does nothing on its own.
+#
+# As written it has only a `workflow_dispatch` trigger, so it never fires by
+# itself -- publishing takes a deliberate click on Actions -> "publish to comfy
+# registry" -> Run workflow. Nothing you push can trigger a release.
+#
+# To turn on automatic publishing later:
+#
+#   1. Confirm the repository secret REGISTRY_ACCESS_TOKEN exists
+#      (Settings -> Secrets and variables -> Actions). It already does.
+#   2. Confirm `version` in pyproject.toml is what you want published, and
+#      that `[tool.comfy].PublisherId` matches your registry publisher.
+#   3. Uncomment the `push:` block below. From then on, every push to main that
+#      changes pyproject.toml publishes that version -- which is why the trigger
+#      is scoped to that one file rather than to the branch.
+#
+# The registry rejects a re-publish of a version that already exists, so the
+# version bump in pyproject.toml is the actual release switch.
+# ============================================================================
+
+on:
+  workflow_dispatch:
+
+  # push:
+  #   branches: [main]
+  #   paths: [pyproject.toml]
+
+jobs:
+  # The whole of tests.yml -- ruff plus the 385-test suite -- called as a
+  # reusable workflow rather than copied. Called with a relative path, so it runs
+  # the tests *from the commit being published*, not from whatever main happens
+  # to hold. That is the difference between this and a `workflow_run` trigger,
+  # which fires after any tests.yml run finishes and would need extra logic to
+  # tie the result back to the right commit.
+  #
+  # What green means here: lint and the CPU suite. It does NOT mean the GPU
+  # smoke tests passed -- those need an H100 and are run from a cluster by hand
+  # (see CONTRIBUTING.md). Run them before bumping the version.
+  test:
+    uses: ./.github/workflows/tests.yml
+
+  publish:
+    # Gate: the registry is only reached if every job in `test` succeeded. A
+    # failed or cancelled run stops here, so a broken commit cannot be
+    # published -- which is the point of the split.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Respects .comfyignore, so the archive excludes tests/, slurm/, scripts/
+      # and .github/ while keeping the docs the listing renders.
+      - uses: Comfy-Org/publish-node-action@main
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}

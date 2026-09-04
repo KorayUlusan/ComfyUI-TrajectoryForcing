@@ -1,59 +1,40 @@
 # The example workflows
 
-Five diagrams, in the order they are meant to be read. Each one is also
-self-documenting: open it and there is a yellow note on the left saying what you
-are looking at, and the nodes are boxed into numbered groups.
+Five diagrams, in reading order. Load one with **Workflow → Open**, or drag the
+`.json` onto the canvas. Each carries a note on the left explaining itself.
 
-Load one with **Workflow → Open** in ComfyUI, or drag the `.json` onto the
-canvas.
-
-> New to ComfyUI? Read **[../docs/GETTING-STARTED.md](../docs/GETTING-STARTED.md)**
-> first — it covers installing and pressing Run.
-
-| | what it shows | runs as-is? |
+| | what it shows | runs as-is |
 |---|---|---|
-| [01 · generate and decode](#01--generate-and-decode) | the method, no editing | yes |
-| [02 · feature edit, typed](#02--feature-edit-coords) | change a region's content | yes |
-| [03 · feature edit, painted](#03--feature-edit-painter) | the same, with a brush | needs two runs |
-| [04 · shape edit](#04--shape-edit) | move a region's boundary | yes |
-| [05 · sweep the seed](#05--sweep-seeds) | one edit across four seeds, tabulated | yes |
+| [01 · generate and decode](#01--generate-and-decode) | the method, no editing | ✅ |
+| [02 · feature edit, typed](#02--feature-edit-coords) | change a region's content | ✅ |
+| [03 · feature edit, painted](#03--feature-edit-painter) | the same, with a brush | two runs by design |
+| [04 · shape edit](#04--shape-edit) | move a region's boundary | ✅ |
+| [05 · sweep the seed](#05--sweep-seeds) | one edit across four seeds, tabulated | ✅ |
 
-Everything here is generated from the live node definitions by
-`scripts/make_workflows.py`, so the files cannot drift from what the nodes
-actually accept. Each is written twice: the `.json` here for the ComfyUI menu,
-and `api/<name>.json` for `POST /prompt`.
+> New to ComfyUI? [**../docs/GETTING-STARTED.md**](../docs/GETTING-STARTED.md)
+> covers installing and pressing Run.
+> Node reference and shared conventions: [**../README.md**](../README.md).
+
+All five are generated from the live node definitions by
+`scripts/make_workflows.py`, so they cannot drift from what the nodes accept.
 
 ---
 
 ## 01 · generate and decode
 
-Sample one trajectory and look at all four levels — decoded to pixels, and as
-the raw token grid.
+Sample one trajectory, look at all four levels — decoded, and as the raw token grid.
 
 ![four levels](../docs/img/trajectory.png)
 
-The first run takes **1–2 minutes** (loading the model and compiling); every
-later run takes about a second.
-
-**Groups:** load the model → sample a trajectory → look at every level.
-
-**Worth changing:**
-
-| node → setting | effect |
+| change | effect |
 |---|---|
-| *TF ImageNet Class* | which of the 1000 ImageNet classes to generate |
+| *TF ImageNet Class* | which of the 1000 classes |
 | *TF Generate* → `seed` | a different sample of the same class |
 | *TF Latent Preview* → `which` | one level instead of all four |
 
-Each strip is **one image with all four levels side by side**, not four images
-you page through — ComfyUI shows a multi-image output one frame at a time behind
-a small `1/4` button, which would leave you looking at level 0. Set
-`sheet_layout` (advanced) to *separate frames* if you want them individually,
-e.g. to save one file per level.
-
-The lower strip is the PCA view — the same four levels as raw tokens in false
-colour. It looks abstract, but it is what the edits in 02–04 operate on, and
-region boundaries are far easier to see there than in the decoded image.
+The lower strip is the PCA view: the same four levels as raw tokens in false
+colour. Abstract, but it is what the edits in 02–04 operate on, and region
+boundaries are far easier to see there than in the decoded image.
 
 ![the latent view](../docs/img/latents.png)
 
@@ -62,157 +43,106 @@ region boundaries are far easier to see there than in the decoded image.
 ## 02 · feature edit (coords)
 
 Take the average feature of a patch of one image, write it into a region of
-another, and re-sample the finer levels from there.
+another, re-sample the finer levels from there.
 
 ![before and after](../docs/img/edit.png)
 
-This is the paper's *feature edit*: `z̃ᵢ = f_src` for the selected tokens.
-Because similar content sits near itself in the model's feature space, writing
-one region's average onto another transfers its identity — and because the finer
-levels are then re-generated rather than pasted, the result is coherent.
+The paper's *feature edit*: `z̃ᵢ = f_src` for the selected tokens. Similar content
+sits near itself in feature space, so writing one region's average onto another
+transfers its identity — and because the finer levels are re-generated rather than
+pasted, the result is coherent.
 
-**Groups:** load and generate two images → choose what to edit → apply and
-re-sample → compare → measure.
+**Selections are `row,col` on the 16×16 token grid.** `7,7` is the middle;
+`6,6:9` is row 6, columns 6–9. The node carries a clickable grid that writes into
+that text field, so you can click or type and the two stay in step.
 
-The edit's `level` is wired from *TF Region Map* rather than typed a second
-time. A selection carries the level whose regions it was snapped to, and the
-edit nodes refuse it at any other — the token grid is the same size at every
-level, so otherwise the edit lands on the wrong region silently.
+*target region* has a region map wired in, so **one click takes the whole
+region**, with boundaries drawn on the grid. *source tokens* does not, so it takes
+your coordinates literally. Unwire `regions` if you want sub-region tokens.
 
-**The coordinates.** The node carries a clickable 16×16 grid — click a cell, or
-drag across several — and it writes the coordinates into the text field below
-it, so you never have to count cells. Typing still works and the two stay in
-step. Selections are `row,col` on the **16×16 token grid**.
-
-The *target region* node has a region map wired in, so **one click takes the
-whole region**, and the grid draws the yellow boundaries you see on the region
-map preview. It learns those from the previous run — on a graph that has never
-run there is no map yet, so the first click picks a single token and the node
-expands it for you. **Alt-click** — option-click on a Mac — writes just that one coordinate. It
-does *not* narrow the selection: with a map wired the node snaps to whole
-regions either way. What it gives you is `7,7` in the text field instead of a
-nine-run coordinate list, which is the line you want in a writeup. Unwire
-*regions* from the node if you actually want sub-region tokens.
-`7,7` is the middle. `6,6:9` means row 6, columns 6 through 9. The *target
-region* input has the region map wired into it, so a single coordinate expands
-to the whole region containing it; the *source tokens* input does not, so it
-takes your coordinates literally.
-
-**Worth changing:**
-
-| node → setting | effect |
+| change | effect |
 |---|---|
 | *target region* → `coords` | **where** the edit lands |
 | *source tokens* → `coords` | **what** gets written there |
-| *TF Feature Edit* → `level` | 0–3. Lower = broader, more semantic change |
+| *TF Feature Edit* → `level` | 0–3. Lower = broader, more semantic |
 | *TF Feature Edit* → `strength` | below 1.0 blends instead of replacing |
 | *TF Feature Edit* → `source_mode` | `region mean` is the paper's edit; `token cycle` copies token-for-token |
 | either *TF Generate* → `class_id` | which two images you are mixing |
 
-**If a result surprises you,** look at the *what was selected* preview before
-changing anything else. It draws your selection on the level you edited, and
-most surprises are the selection not being where you thought. Every preview is
-numbered along its top and left edges, so a coordinate can be read off rather
-than counted.
+**If a result surprises you,** check the *what was selected* preview first —
+most surprises are the selection not being where you thought. Previews are
+numbered along their edges so a coordinate can be read off.
 
-**Did it actually change anything?** *TF Compare Levels* at the bottom reports
-tokens changed per level and draws a heatmap of where. An edit at level 2 should
-show zero change at levels 0 and 1, the selected tokens at level 2, and diffuse
-change at level 3. Anything else is the interesting kind of wrong.
-
-**Levels below the edit never change.** Sampling is Markov in the level index,
-so an edit only ever propagates upward. Editing at level 3 changes nothing
-downstream of itself, because there is nothing above it — which is why the
-default is 2.
+**Did it change anything?** *TF Compare Levels* reports tokens changed per level
+and draws a heatmap. An edit at level 2 should show zero change at levels 0–1,
+the selected tokens at 2, and diffuse change at 3. Anything else is the
+interesting kind of wrong.
 
 ---
 
 ## 03 · feature edit (painter)
 
-The same edit, but you pick the region with a brush.
+The same edit, region picked with a brush.
 
-**This one takes two runs, by design.** ComfyUI has to run the graph once to
-produce the canvas before there is anything to paint on:
+**Two runs, by design** — the graph has to run once to produce the canvas:
 
-1. **Run.** It stops at *TF Tokens From Mask* with a note saying nothing is
-   painted yet. The canvas appears **inside the Painter node**.
+1. **Run.** It stops at *TF Tokens From Mask*; the canvas appears inside the Painter.
 2. **Paint** over the area you want to change.
-3. **Run again.** Now it finishes.
+3. **Run again.**
 
-> **"Node 2.0 only" in the Painter?** That widget exists only in ComfyUI's new
-> node rendering. **Settings (gear, bottom left) → search "Node 2.0" → enable**,
-> then reload. *TF Level Canvas* detects the setting and says so too. Workflow
-> 02 needs none of this.
-
-The Painter shows the canvas behind your brush because *TF Level Canvas*
-publishes it as a node preview — the Painter takes its backdrop from the stored
-preview of whatever feeds its `image` slot, not from the wire.
-
-The grid on the canvas is the token grid — one cell is one token. The yellow
-lines are region boundaries. Your stroke is **snapped to whole regions**, so it
-does not need to be neat: covering most of a region selects all of it.
+Your stroke is **snapped to whole regions**, so it need not be neat: covering
+most of a region selects all of it.
 
 ![the regions](../docs/img/regions.png)
 
-**If it still stops after you painted,** the note in *TF Tokens From Mask* says
-which of the two thresholds you missed:
+**If it still stops after painting,** the note says which threshold you missed:
 
-| setting | meaning | when to change it |
+| setting | meaning | change it when |
 |---|---|---|
-| `coverage` | fraction of a token's pixels that must be painted | you painted too thinly |
-| `region_overlap` | fraction of a region's tokens that must be painted | your stroke spread over too many regions |
+| `coverage` | fraction of a token's pixels painted | you painted too thinly |
+| `region_overlap` | fraction of a region's tokens painted | your stroke spread over too many regions |
 
-Unwire the *regions* input from *TF Tokens From Mask* to select painted tokens
-literally instead of snapping — useful for a deliberately ragged selection.
+Unwire `regions` to take painted tokens literally instead of snapping — useful
+for a deliberately ragged selection.
+
+> **Painter says "Node 2.0 only"?** See
+> [README → Troubleshooting](../README.md#troubleshooting). Workflow 02 needs
+> none of this.
 
 ---
 
 ## 04 · shape edit
 
-Change *where a region ends* rather than what it contains.
+Change *where a region ends* rather than what it contains. Tokens are handed to a
+neighbour and take on the receiving region's average feature, so the boundary
+moves and no new content is invented — the paper's `R_a → R_b`.
 
-Tokens are handed from one region to a neighbour and take on the receiving
-region's average feature, so the boundary moves and no new content is invented.
-This is the paper's *shape edit*: reassign `R_a → R_b`.
-
-**Groups:** load and generate → find a boundary and name both sides → move it →
-result.
-
-Two selections, both on the token grid:
+Two selections:
 
 - **tokens to hand over** — the ones that change sides.
-- **one token in the receiving region** — anywhere inside the region taking
-  them. The whole region it names supplies the feature, not just that token,
-  which is what keeps the content unchanged.
+- **one token in the receiving region** — the whole region it names supplies the
+  feature, which is what keeps the content unchanged.
 
-They must name **different** regions; the node stops and says so otherwise.
+They must name **different** regions, or the node stops and says so.
 
 **Look at the region map preview first.** It is the only reliable way to pick
-coordinates that actually straddle a boundary — at the default threshold of 0.9
-there are around 50 regions over the 256 tokens, and they are not where you
-would guess.
+coordinates that straddle a boundary: at threshold 0.9 there are ~50 regions over
+256 tokens, and they are not where you would guess.
 
 **Worth changing:** *TF Region Map* → `cosine_threshold`. Higher splits into
-more, smaller regions; lower merges them. It changes what counts as "one thing"
+more, smaller regions; lower merges them. It changes what counts as "one thing",
 and therefore what a shape edit can move.
 
 ---
 
 ## 05 · sweep seeds
 
-The same edit as workflow 02, run four times over.
+Workflow 02's edit, four times over, to answer *"was that the edit, or was that
+the seed?"*
 
-One before/after pair cannot answer *"was that the edit, or was that the seed?"*
-Re-sampling level 3 from an edited canvas is still sampling, and it lands
-somewhere different every time. *TF Sweep Edit* separates the two: it runs the
-identical edit once per seed, and for each arm it *also* re-samples the
-**unedited** canvas with that same seed. Each row is then the edit's effect with
-the seed held fixed and cancelled out.
-
-**Groups:** load and generate both trajectories → choose the edit (held fixed
-across every arm) → sweep and tabulate → one arm in detail → keep the numbers.
-
-The table is in the node's own body:
+*TF Sweep Edit* runs the identical edit once per seed and, for each arm, also
+re-samples the **unedited** canvas with that same seed. Each row is then the
+edit's effect with the seed cancelled out.
 
 ```
 seed         tokens changed   mean dist   max dist
@@ -223,98 +153,61 @@ seed         tokens changed   mean dist   max dist
 spread across arms: 0.0270 mean pairwise cosine distance at level 3
 ```
 
-Two numbers to read, and they mean different things:
-
 - **mean dist** — how far the edit moved the final level, against that arm's own
-  no-edit baseline. Here ~0.067, and consistent across seeds.
-- **spread across arms** — how far the arms are from *each other*. Here 0.027.
-  So the edit moves the result about 2.5× as far as the choice of seed does, and
-  a single-seed result from workflow 02 was worth trusting. Had the spread been
-  the larger of the two, it would not have been.
+  no-edit baseline.
+- **spread across arms** — how far the arms are from *each other*. Here the edit
+  moves the result ~2.5× as far as the seed does, so a single-seed result from
+  workflow 02 was worth trusting. Had the spread been larger, it would not have been.
 
-Below the `changed` threshold the node says so outright, rather than leaving you
-to compare two decimals.
-
-**The contact sheet** is the no-edit baseline first, then one frame per arm,
-stitched into one image — so the visual comparison has a control in it, and the
-arms sit side by side at full size rather than in separate pictures. Long sweeps
-wrap into a grid. `sheet_layout` (advanced) → *separate frames* returns them as a
-batch instead, which is what *SaveImage* needs to write one file per arm.
-
-**Worth changing:**
-
-| widget | try |
+| change | try |
 |---|---|
-| `values` | any list, or `1-8` for a range. Duplicates are dropped. |
-| `axis` → `level (l*)` | with `values` `0-3`: the same edit at each level in turn. This is the sweep Sec. 4.4 is really about — coarser edits cascade through more re-sampling. |
-| `axis` → `strength` | with `values` `0.25,0.5,0.75,1.0`: where a blend stops being a blend. |
-| `output_arm` (advanced) | which arm leaves on the `levels` output, for the *TF Compare Levels* at the bottom right, or for saving. |
-| `arm_limit` (advanced) | the guard that refuses to start rather than let a mistyped `0-1000` hold the GPU for an hour. |
+| `values` | any list, or `1-8` for a range. Duplicates dropped. |
+| `axis` → `level (l*)` | with `0-3`: the same edit at each level. The sweep Sec. 4.4 is really about — coarser edits cascade through more re-sampling. |
+| `axis` → `strength` | with `0.25,0.5,0.75,1.0`: where a blend stops being a blend. |
+| `output_arm` (advanced) | which arm leaves on `levels`, for the *TF Compare Levels* at the bottom |
+| `arm_limit` (advanced) | refuses to start rather than let a mistyped `0-1000` hold the GPU |
+| `decode` off (advanced) | contact sheet uses PCA tiles instead; costs nothing, table identical |
 
-**The table is saved, not just shown.** *TF Save Report* at the bottom appends
-it to `output/trajectory_forcing/sweep.md`, fenced so the columns survive, with
-the class, seed and full edit history above it. Successive runs accumulate in
-the one file, so a session's sweeps end up side by side and comparable. A number
-you cannot trace back to the run that made it is worth much less than it looks.
+**Cost:** two re-samples and one decode per arm. Four arms is seconds once warm;
+forty is a coffee.
 
-**The sheet is saved too, and that one matters more.** *TF Save Images* writes
-it to `output/trajectory_forcing/sweep.png` under the same name, so the table
-and the picture from one run sit together. The preview above it goes to
-ComfyUI's *temp* directory, which gets cleared — and unlike the table, the sheet
-cannot be rebuilt: only the arm named by `output_arm` leaves the sweep as a
-trajectory, so every other arm exists in that image or nowhere. Each PNG carries
-the class, seed and edit history in its own metadata.
+Group 5 writes both the table (`sweep.md`) and the sheet (`sweep.png`) to
+`output/trajectory_forcing/` under one name. The sheet matters more: only the arm
+named by `output_arm` leaves as a trajectory, so every other arm exists in that
+image or nowhere.
 
-**Cost:** two re-samples and one decode per arm. Four arms is a few seconds once
-the model is warm; forty is a coffee. Turn `decode` off (advanced) and the
-contact sheet uses PCA tiles instead, which costs nothing — the table is
-identical either way.
+<details>
+<summary><b>Two axes behave specially</b></summary>
 
-**Whatever is not on the axis is pinned** to its own widget, so no two arms ever
-differ in two ways at once. The report records the pinned values, which is what
-makes the table readable a month later.
+**`level (l*)`** is the one axis that cannot hold everything fixed: a selection
+snapped to level 2's regions is not a whole region at level 0. The node keeps the
+**token set** fixed — what "the same edit at every level" has to mean — and says
+so in the report rather than refusing. Use typed coordinates rather than a
+snapped selection if you want the token set to be exactly what you chose.
 
-> Sweeping `level (l*)` is the one axis that cannot hold everything else fixed:
-> a selection snapped to level 2's regions is not a whole region at level 0. The
-> node keeps the **token set** fixed — which is what "the same edit at every
-> level" has to mean — and says so in the report rather than refusing. Use typed
-> coordinates rather than a snapped selection if you want the token set to be
-> exactly what you chose.
-
-**It sweeps shape edits too.** Wire a *TF Region Map* into `regions` and the
-edit becomes the one from workflow 04: the target tokens are handed to the
-region named by the source tokens. `seed` and `strength` both work; `level (l*)`
-is refused, because a region map describes exactly one level and the boundaries
-are somewhere else at every other. "Was that the boundary move, or the seed?" is
-the same question as before and gets the same answer.
+**Shape edits sweep too.** Wire a *TF Region Map* into `regions` and the edit
+becomes workflow 04's. `seed` and `strength` work; `level (l*)` is refused,
+because a region map describes exactly one level.
+</details>
 
 ---
 
 ## Building your own
 
-Useful pieces not wired into any of the five:
+Pieces not wired into any of the five:
 
 | node | for |
 |---|---|
-| **TF Tokens Combine** | union/intersect/subtract several selections into one region |
-| **TF Save / Load Levels** | keep a trajectory across restarts, so two edits can be compared against the identical starting image |
-| **TF Save Report** | write a sweep or compare table to `output/trajectory_forcing/*.md` with the run that produced it — wired into workflow 05 |
-| **TF Save Images** | write the pictures to `output/trajectory_forcing/*.png` under the same name, with the run stamped into the PNG metadata — wired into workflow 05 |
-| **TF Levels Info** | the class, seed and full edit history of a trajectory |
-| **TF Level Canvas** → `view: decoded RGB` | paint against the picture instead of the false-colour tokens |
+| **TF Tokens Combine** | union/intersect/subtract selections into one region |
+| **TF Save / Load Levels** | keep a trajectory across restarts, so two edits share an identical starting image |
+| **TF Levels Info** | class, seed and full edit history of a trajectory |
+| **TF Level Canvas** → `view: decoded RGB` | paint against the picture instead of false-colour tokens |
 
-Three things to know when wiring your own graph:
+**Edits do not sample.** *TF Feature Edit* and *TF Shape Edit* only produce the
+edited canvas; nothing happens to the image until *TF Resume From Level* runs. A
+trajectory edited but not resumed is marked, and *TF Decode Levels* warns rather
+than showing you stale levels.
 
-- **The `pipeline` socket is usually not needed.** A trajectory carries the
-  pipeline that made it. Wire it only for a trajectory from *TF Load Levels*, or
-  to override.
-
-- **Edits do not sample.** *TF Feature Edit* and *TF Shape Edit* only produce
-  the edited canvas. Nothing happens to the image until *TF Resume From Level*
-  re-generates the finer levels. A trajectory that has been edited but not
-  resumed is marked, and *TF Decode Levels* warns rather than silently showing
-  you stale levels.
-- **Leave the advanced `-1`s alone unless you mean it.** `-1` means "decide for
-  me" everywhere it appears: *TF Resume From Level* takes the level from
-  whichever edit fed it and keeps the trajectory's class, *TF Feature Edit*
-  reads the source from the level being edited. Each node prints which it did.
+The rest of the shared behaviour — the `pipeline` socket, `-1 = auto`, why
+several frames arrive as one image, why a selection remembers its level — is in
+[README → Nodes](../README.md#nodes).

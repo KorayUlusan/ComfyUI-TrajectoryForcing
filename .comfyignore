@@ -1,0 +1,25 @@
+# Kept out of the Comfy Registry archive, not out of git. Syntax is .gitignore's,
+# and it layers on top of it -- anything git already ignores is excluded anyway.
+#
+# The bundle is what lands in someone's custom_nodes/, so the rule here is
+# "would a user of the nodes ever open this file?". Development tooling would
+# not; documentation would, so every .md and docs/img/ stays (README.md is the
+# registry listing's own body, and it references those images).
+#
+# CONTRIBUTING.md ships while the tooling it describes does not. That is
+# deliberate: it points readers at the GitHub repo, which is where anyone
+# changing the code should be working from in the first place.
+
+# The test suite -- the largest thing here, and of no use without a checkout.
+tests/
+
+# Slurm job scripts and the smoke/measurement tooling they run.
+slurm/
+scripts/
+
+# CI.
+.github/
+
+# Editor and local scratch.
+.vscode/
+.idea/

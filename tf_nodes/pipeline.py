@@ -53,10 +53,53 @@ def _reroot_rae(config) -> str | None:
     return absolute
 
 
+#: Imported by TrajectoryForcing, not by this extension directly, so a missing
+#: one surfaces as a ModuleNotFoundError from inside TF's own code.
+RUNTIME_DEPS = ("jax", "flax", "orbax", "ml_collections")
+
+
+def check_runtime_deps() -> None:
+    """Fail with the command that fixes it, rather than from inside TF.
+
+    This is the most likely first failure for anyone who installed through
+    ComfyUI Manager. Manager installs the node's `requirements.txt`, which is
+    deliberately empty here -- listing jax and a CUDA-matched torch would have
+    Manager rewrite torch underneath every other node in that install. So the
+    nodes register and this is where the missing half is noticed.
+
+    Checked with `find_spec`, not by importing: importing jax initialises its GPU
+    backend, which `configure_jax_env` has to happen before, and which there is
+    no undoing inside a running process.
+    """
+    from importlib.util import find_spec
+
+    missing = []
+    for name in RUNTIME_DEPS:
+        try:
+            if find_spec(name) is None:
+                missing.append(name)
+        except (ImportError, ValueError):  # a broken or half-installed package
+            missing.append(name)
+    if not missing:
+        return
+    raise ImportError(
+        f"TrajectoryForcing needs {', '.join(missing)}, which {'is' if len(missing) == 1 else 'are'} "
+        "not installed in the environment ComfyUI is running in.\n\n"
+        "This extension runs a JAX model inside the ComfyUI process, and the two dependency "
+        "sets only coexist at one specific torch version -- so it needs its own environment "
+        "rather than additions to an existing one. From the extension directory:\n\n"
+        "    bash env/setup.sh\n\n"
+        "then start ComfyUI from the venv it builds. env/requirements.txt lists what goes in "
+        "and why; the top-level requirements.txt is empty on purpose, so that installing this "
+        "node through ComfyUI Manager cannot rewrite the torch every other node depends on."
+    )
+
+
 class TFPipeline:
     """One loaded TrajectoryForcing model, shared by every node that references it."""
 
     def __init__(self, config_name: str, checkpoint_name: str):
+        check_runtime_deps()
         self.config_name = config_name
         self.checkpoint_name = checkpoint_name
         self.checkpoint_path = resolve_checkpoint(checkpoint_name)

@@ -18,18 +18,40 @@
 # unless ~/.ssh/authorized_keys happens to contain your own ~/.ssh/id_*.pub.
 # From your laptop you then need only the ordinary hop to the login node:
 #
-#   ssh -N -L PORT:localhost:PORT <user>@ferranti-login001.mlcloud.uni-tuebingen.de
+#   ssh -N -L PORT:localhost:PORT <user>@<your-login-node>
 #
 # or nothing at all if you are on VS Code Remote, which forwards localhost ports
 # for you.
 set -euo pipefail
 
 EXT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Local overrides, if you made one: `cp .env.example .env`. Gitignored, so your
+# paths never reach a commit. .env.example writes every line as
+# `KEY="${KEY:-default}"`, so a value exported on the command line still wins.
+# TF_ENV_FILE points somewhere else -- one file per cluster, say.
+TF_ENV_FILE="${TF_ENV_FILE:-$EXT_DIR/.env}"
+if [[ -f "$TF_ENV_FILE" ]]; then
+  set -a; . "$TF_ENV_FILE"; set +a
+fi
+
 PORT="${1:-8188}"
 JOB_NAME="tf-comfyui-$$"          # unique per shell, so cleanup cannot hit someone else's job
-PARTITION="${TF_PARTITION:-h100-ferranti}"
-QOS="${TF_QOS:-vs}"               # jumps the queue; capped at 1 job / 12 h / 4 CPU / 1 GPU
+# No defaults: a partition or QOS name is a property of *your* cluster, and a
+# wrong one fails with a Slurm error that does not say which of the two it was.
+# Unset means "do not pass the flag", so Slurm applies the cluster default --
+# which is right on a cluster with a sensible one, and on a cluster without you
+# want to have chosen anyway. Set them in .env; see .env.example.
+# `sinfo -s` lists partitions, `sacctmgr show qos format=name` lists QOS names.
+PARTITION="${TF_PARTITION:-}"
+QOS="${TF_QOS:-}"
 TIME_LIMIT="${TF_TIME:-08:00:00}"
+
+# Built as an array so an unset value contributes no argument at all, rather
+# than an empty `--partition=` that Slurm rejects.
+SLURM_OPTS=()
+[[ -n "$PARTITION" ]] && SLURM_OPTS+=(--partition="$PARTITION")
+[[ -n "$QOS" ]] && SLURM_OPTS+=(--qos="$QOS")
 
 command -v ncat >/dev/null || { echo "ERROR: ncat not found; it is what bridges this node to the job." >&2; exit 1; }
 
@@ -44,7 +66,12 @@ sweep_stale_bridges() {
   local pid cmdline node stale=()
   for pid in $(pgrep -u "$USER" -x ncat 2>/dev/null || true); do
     cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
-    node=$(grep -oE 'mlcbm[0-9]+' <<<"$cmdline" | head -1 || true)
+    # The node comes out of the bridge's own command line -- `--sh-exec ncat
+    # <node> <port>` -- rather than a hostname pattern. This used to grep for
+    # 'mlcbm[0-9]+', so on any cluster whose nodes are named differently the
+    # sweep silently matched nothing and the leak it exists to clear came back
+    # with no error to explain it.
+    node=$(sed -nE 's/.*--sh-exec[[:space:]]+ncat[[:space:]]+([^[:space:]]+).*/\1/p' <<<"$cmdline" | head -1)
     # Only ours, and only when no job of ours is still on that node.
     [[ -z "$node" ]] && continue
     if ! squeue -h -u "$USER" -t R -o "%N" 2>/dev/null | grep -qx "$node"; then
@@ -176,7 +203,7 @@ cat <<EOF
   ────────────────────────────────────────────────────────────────────────
   What happens next:
 
-    1. This asks Slurm for a GPU on ${PARTITION} (qos=${QOS}, up to ${TIME_LIMIT}).
+    1. This asks Slurm for a GPU on ${PARTITION:-<cluster default>} (qos=${QOS:-<cluster default>}, up to ${TIME_LIMIT}).
        It may sit in the queue for a while -- that is normal, not a hang.
     2. Once it starts, ComfyUI boots and prints a lot of log lines.
     3. WAIT FOR THIS LINE:
@@ -207,6 +234,6 @@ else
 fi
 
 srun --job-name="$JOB_NAME" \
-     --partition="$PARTITION" --qos="$QOS" \
+     "${SLURM_OPTS[@]}" \
      --gres=gpu:1 --ntasks=1 --cpus-per-task=4 --mem=64G --time="$TIME_LIMIT" \
      "${PTY[@]}" "$EXT_DIR/run_comfyui.sh" "$PORT"

@@ -1,58 +1,25 @@
-# What the ComfyUI venv needs on top of ComfyUI's own requirements.txt.
+# Deliberately empty of installable requirements. Read on before adding one.
 #
-# Install order matters, and env/setup.sh does it correctly -- prefer running
-# that over pip-installing this file on its own. The short version: this
-# extension runs TrajectoryForcing's JAX model *inside* the ComfyUI process, so
-# one environment has to satisfy both dependency sets at once.
+# ComfyUI Manager pip-installs a custom node's requirements.txt into whatever
+# venv ComfyUI is running in. This extension needs jax[cuda12], a CUDA-matched
+# torch, and TrajectoryForcing's pinned flax stack -- so listing them here would
+# mean that clicking "install" on this node rewrites torch and the CUDA runtime
+# libraries underneath every *other* node in that install. That breaks working
+# setups, and it breaks them in a way that has nothing to do with this node.
 #
-# The one place they disagree, found by running it (2026-09-03):
+# The real list is env/requirements.txt. env/setup.sh installs those same pins,
+# staged rather than from that file -- torch comes from download.pytorch.org and
+# the JAX stack has to resolve before torch is read, which one requirements file
+# cannot express. A test keeps the two lists in step. setup.sh builds a dedicated
+# venv rather than adding to an existing one, because the two dependency sets
+# only coexist at one specific torch version:
 #
-#   TrajectoryForcing pins torch==2.6.0. ComfyUI 0.34's comfy-kitchen==0.2.31
-#   registers a torch custom op annotated `list[int]`, which torch 2.6's
-#   infer_schema rejects outright -- `import comfy.quant_ops` fails, so ComfyUI
-#   does not start at all. torch 2.8.0 is the resolution used here. Nothing on
-#   TF's inference path (the RAE ViT-XL decoder, via transformers) is version
-#   sensitive, and TF's own training pin is not binding on an inference-only
-#   install -- but this is a deviation from TrajectoryForcing/requirements.txt
-#   and belongs in any writeup of a number produced through these nodes.
+#     bash env/setup.sh
 #
-# cu128 rather than cu130: jax 0.4.36 is a CUDA 12 build, and keeping torch on
-# the same CUDA major avoids two runtimes in one process. ComfyUI logs a warning
-# asking for cu130 -- that is about its own quantisation kernels, which nothing
-# here uses.
-
-# --- TrajectoryForcing's JAX stack, pinned exactly as TF pins it -------------
-jax[cuda12]==0.4.36
-flax==0.10.4
-optax==0.2.5
-orbax-checkpoint==0.11.0
-chex==0.1.87
-ml_dtypes==0.5.1
-tensorstore==0.1.76
-ml_collections==1.1.0
-
-# --- torch, moved off TF's pin for the reason above -------------------------
-# install with: --index-url https://download.pytorch.org/whl/cu128
-torch==2.8.0
-torchvision==0.23.0
-torchaudio==2.8.0
-
-# --- what TF's inference path needs beyond that -----------------------------
-transformers==5.3.0
-huggingface_hub
-PyYAML
-# wandb is not optional: TF's utils/logging_util.py imports it at module scope,
-# and utils/ckpt_util.py -- which Pipeline.__init__ imports -- pulls that in.
-wandb==0.22.0
-numpy>=2.2
-scipy
-scikit-learn
-pillow
-einops
-timm
-
-# --- then ComfyUI's own requirements.txt, installed last --------------------
-# -r ${COMFY_DIR}/requirements.txt
-
-# --- tests ------------------------------------------------------------------
-pytest
+# So a Manager install of this node does no harm and also does not finish the
+# job: the nodes register, and TF Load Pipeline stops with an error naming this
+# file and that command. See README.md ("Requirements") for why this extension
+# cannot share an arbitrary ComfyUI environment.
+#
+# If you add a dependency, put it in env/requirements.txt. A line here is
+# installed into other people's environments.

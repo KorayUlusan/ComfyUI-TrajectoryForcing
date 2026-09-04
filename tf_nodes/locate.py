@@ -25,6 +25,22 @@ RAE_SUBDIR = Path("checkpoints") / "rae"
 
 _TF_REPO: Path | None = None
 
+TF_REPO_URL = "https://github.com/mervekocabas/TrajectoryForcing.git"
+
+# The upstream commit this extension is developed and tested against. Pinned
+# rather than tracking main for the same reason the model code is imported
+# rather than vendored: the extension calls into TF's own API, so a change up
+# there is a change here, and it should arrive when someone bumps this line and
+# re-runs the smoke tests -- not silently, on a stranger's first install.
+#
+# To update: bump the sha, run `./slurm/submit.sh slurm/gpu_smoke.sbatch`, and
+# record the job id in PLAN.md.
+TF_REPO_COMMIT = "2fab8a6acd08efa2532b0312ee03fb68f8ef8e7e"
+
+# Where an automatic fetch puts it. Inside the extension, so a Manager install is
+# self-contained and uninstalling takes the checkout with it.
+TF_REPO_FETCH_DIR = EXT_ROOT / "TrajectoryForcing"
+
 
 def _candidates() -> list[tuple[str, Path]]:
     out: list[tuple[str, Path]] = []
@@ -32,7 +48,7 @@ def _candidates() -> list[tuple[str, Path]]:
     if env:
         out.append(("$TF_REPO", Path(env).expanduser()))
     out.append(("sibling of the extension", EXT_ROOT.parent / "TrajectoryForcing"))
-    out.append(("inside the extension", EXT_ROOT / "TrajectoryForcing"))
+    out.append(("inside the extension", TF_REPO_FETCH_DIR))
     return out
 
 
@@ -40,12 +56,79 @@ def _looks_like_tf_repo(path: Path) -> bool:
     return (path / "editing_env" / "tf_pipeline.py").is_file() and (path / "pmf.py").is_file()
 
 
-def tf_repo() -> Path:
+def _git(*args: str, cwd: Path | None = None) -> None:
+    import subprocess
+
+    subprocess.run(("git", *args), cwd=cwd, check=True,
+                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+
+def fetch_tf_repo(dest: Path = TF_REPO_FETCH_DIR, progress=None) -> Path:
+    """Clone TrajectoryForcing at the pinned commit.
+
+    Most people arrive through ComfyUI Manager, which installs this extension and
+    nothing else -- so "now clone a second repository by hand" is a wall in front
+    of the first run, and one the Manager gives no way to satisfy. The model code
+    still is not vendored; it is fetched, pinned, and left as its own checkout.
+
+    `git init` + a fetch of the one commit rather than `clone --depth 1`, because
+    a shallow clone gets whatever main points at today, which is exactly the
+    unpinned dependency this is avoiding. If the server refuses a fetch by sha
+    (some mirrors do), that is reported rather than silently falling back to an
+    unpinned tip.
+    """
+    if _looks_like_tf_repo(dest):
+        return dest
+    if dest.exists() and any(dest.iterdir()):
+        raise FileNotFoundError(
+            f"{dest} exists but does not look like a TrajectoryForcing checkout "
+            f"(no pmf.py / editing_env/). Remove it, or set TF_REPO to a good one."
+        )
+    import shutil
+
+    if shutil.which("git") is None:
+        raise FileNotFoundError(
+            "TrajectoryForcing is not present and `git` is not installed to fetch it. "
+            f"Clone {TF_REPO_URL} yourself and point TF_REPO at it."
+        )
+    # This is the one slow thing that can happen with no node on screen to show
+    # it -- TF Load Pipeline's own bar does not start until the checkout is
+    # found. ComfyUI prints these to its console and, since the launchers keep
+    # rolling logs, to a file afterwards; without them a first run looks hung,
+    # which is exactly how the slow load was reported before it got a bar.
+    import logging
+
+    note = f"fetching TrajectoryForcing @ {TF_REPO_COMMIT[:8]} into {dest} (one time)"
+    logging.getLogger(__name__).info(note)
+    if progress is not None:
+        progress(note)
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        _git("init", "-q", str(dest))
+        _git("remote", "add", "origin", TF_REPO_URL, cwd=dest)
+        _git("fetch", "-q", "--depth", "1", "origin", TF_REPO_COMMIT, cwd=dest)
+        _git("checkout", "-q", "FETCH_HEAD", cwd=dest)
+    except Exception:
+        # Leaving a half-clone behind would make the next attempt take the
+        # "exists but is not a checkout" branch above and need manual cleanup.
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    if not _looks_like_tf_repo(dest):
+        shutil.rmtree(dest, ignore_errors=True)
+        raise FileNotFoundError(
+            f"Fetched {TF_REPO_URL} into {dest} but it has no pmf.py / editing_env/."
+        )
+    return dest
+
+
+def tf_repo(progress=None) -> Path:
     """The TrajectoryForcing checkout this extension runs against.
 
     Everything (model code, configs, the RAE decoder sources) is imported from
     there rather than vendored, so the extension always tracks the pinned
-    submodule instead of a stale copy of its math.
+    upstream instead of a stale copy of its math. An existing checkout is always
+    preferred over fetching one -- `$TF_REPO` first, then a sibling of this
+    extension -- so nobody ends up with two copies of a 2 GB decoder.
     """
     global _TF_REPO
     if _TF_REPO is not None:
@@ -56,11 +139,14 @@ def tf_repo() -> Path:
             _TF_REPO = path
             return _TF_REPO
         tried.append(f"  {label}: {path}")
-    raise FileNotFoundError(
-        "Could not find the TrajectoryForcing checkout. Tried:\n"
-        + "\n".join(tried)
-        + "\nSet TF_REPO to the directory containing pmf.py and editing_env/."
-    )
+    if os.environ.get("TF_NO_AUTO_FETCH", "").strip():
+        raise FileNotFoundError(
+            "Could not find the TrajectoryForcing checkout, and TF_NO_AUTO_FETCH is set. "
+            "Tried:\n" + "\n".join(tried)
+            + "\nSet TF_REPO to the directory containing pmf.py and editing_env/."
+        )
+    _TF_REPO = fetch_tf_repo(progress=progress)
+    return _TF_REPO
 
 
 def tf_configs() -> list[str]:

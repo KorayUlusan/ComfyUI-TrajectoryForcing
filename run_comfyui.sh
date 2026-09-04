@@ -11,7 +11,17 @@
 set -euo pipefail
 
 EXT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORK="${WORK:-/weka/geiger/gwb965}"
+
+# Local overrides, if you made one: `cp .env.example .env`. Gitignored, so your
+# paths never reach a commit. .env.example writes every line as
+# `KEY="${KEY:-default}"`, so a value exported on the command line still wins.
+# TF_ENV_FILE points somewhere else -- one file per cluster, say.
+TF_ENV_FILE="${TF_ENV_FILE:-$EXT_DIR/.env}"
+if [[ -f "$TF_ENV_FILE" ]]; then
+  set -a; . "$TF_ENV_FILE"; set +a
+fi
+
+WORK="${WORK:-$HOME}"
 COMFY_DIR="${COMFY_DIR:-$WORK/ComfyUI}"
 VENV="${COMFY_VENV:-$WORK/.venvs/comfyui-tf}"
 PORT="${1:-8188}"

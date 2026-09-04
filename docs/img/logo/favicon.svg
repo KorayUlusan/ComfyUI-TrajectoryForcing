@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" viewBox="0 0 52 52" role="img" aria-label="Trajectory Forcing mark">
+  <defs>
+    <linearGradient id="tfFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16a3a3"/>
+      <stop offset="1" stop-color="#ff6a3d"/>
+    </linearGradient>
+    <linearGradient id="tfSheen" x1="0" y1="0" x2="1" y2="0"
+        gradientUnits="objectBoundingBox" gradientTransform="rotate(25 0.5 0.5)">
+      <stop offset="0.40" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.50" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="0.60" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="tfClip"><rect width="52" height="52" rx="14" ry="14"/></clipPath>
+  </defs>
+  <g clip-path="url(#tfClip)">
+    <rect width="52" height="52" fill="url(#tfFill)"/>
+    <rect width="52" height="52" fill="url(#tfSheen)"/>
+    <!--
+      Positioned by explicit baseline, NOT by dominant-baseline="central".
+      librsvg (which rsvg-convert, ImageMagick and most CLI rasterisers use)
+      ignores dominant-baseline outright: rendering with and without it is
+      byte-identical. So it treated the old y="27" as the baseline and put the
+      glyphs 7 SVG units too high. Browsers honour it, so the mark looked
+      centred in a tab and wrong in every exported PNG.
+
+      y = 26 + capHeight/2, cap height about 0.73em at font-size 22, giving
+      34.03. That is geometry rather than a fudge, and it holds across the
+      fallback stack (DejaVu 0.729, Inter 0.727, Google Sans about 0.71).
+
+      x = 26.81 rather than 26, because letter-spacing adds a trailing advance
+      after the final F which text-anchor="middle" then counts, and T/F side
+      bearings are asymmetric. Verified by measuring the rendered ink bounding
+      box against the image centre: both offsets are 0.00 units.
+    -->
+    <text x="26.81" y="34.03" text-anchor="middle"
+      font-family="'Google Sans','Inter','Helvetica Neue',Arial,sans-serif"
+      font-weight="800" font-size="22" letter-spacing="0.5" fill="#ffffff">TF</text>
+  </g>
+</svg>

@@ -20,7 +20,8 @@ from pathlib import Path
 import pytest
 
 EXT_ROOT = Path(__file__).resolve().parent.parent
-SCRIPTS = sorted(EXT_ROOT.glob("*.sh")) + sorted(EXT_ROOT.glob("env/*.sh"))
+SCRIPTS = (sorted(EXT_ROOT.glob("*.sh")) + sorted(EXT_ROOT.glob("env/*.sh"))
+           + sorted(EXT_ROOT.glob("slurm/*.sh")))
 
 # `squeue` is asked two different questions and has to answer them differently,
 # or the script waits on itself: the bridge polls for a running node (%N) and
@@ -57,12 +58,93 @@ def run_launcher(stub_path, log_dir, extra_env=None):
         **os.environ,
         "PATH": f"{stub_path}:{os.environ['PATH']}",
         "TF_LOG_DIR": str(log_dir),
+        # Point away from the repo's own .env unless a test says otherwise.
+        # Without this every launcher test would read whatever the developer
+        # happens to have configured -- so the suite would pass here, fail in CI
+        # where no .env exists, and neither result would mean anything.
+        "TF_ENV_FILE": str(log_dir / "no-such.env"),
         **(extra_env or {}),
     }
     return subprocess.run(
         ["bash", str(EXT_ROOT / "run_comfyui_slurm.sh"), "8199"],
         env=env, capture_output=True, text=True, timeout=120,
     )
+
+
+class TestTheLocalEnvFile:
+    """`.env` overrides, exercised rather than assumed.
+
+    This is the shape that has already cost a session here: the silent-exit bug
+    was one untested line of setup in a launcher, invisible to `bash -n` because
+    it was a runtime status and not a syntax error. Sourcing a file under
+    `set -euo pipefail` is the same kind of line, in six scripts now.
+
+    `TF_ENV_FILE` exists so these can point somewhere other than the repo root.
+    Writing a `.env` into EXT_ROOT to test it would clobber the developer's own.
+    """
+
+    def env_file(self, tmp_path, body: str):
+        path = tmp_path / "test.env"
+        path.write_text(body)
+        return path
+
+    def test_a_value_in_the_file_reaches_the_script(self, stub_path, tmp_path):
+        # TF_PARTITION is echoed back by the launcher's own banner.
+        env_file = self.env_file(tmp_path, 'TF_PARTITION="${TF_PARTITION:-from-the-env-file}"\n')
+        out = run_launcher(stub_path, tmp_path / "logs",
+                           {"TF_ENV_FILE": str(env_file)})
+        assert "from-the-env-file" in out.stdout, out.stdout[-2000:]
+
+    def test_the_command_line_still_wins_over_the_file(self, stub_path, tmp_path):
+        # The scripts source with `set -a`, so a plain `KEY=value` in the file
+        # would overwrite an exported one -- silently reversing the precedence
+        # everyone expects. .env.example is written `KEY="${KEY:-default}"` for
+        # exactly this, and that is only true as long as something checks it.
+        env_file = self.env_file(tmp_path, 'TF_PARTITION="${TF_PARTITION:-from-the-env-file}"\n')
+        out = run_launcher(stub_path, tmp_path / "logs",
+                           {"TF_ENV_FILE": str(env_file), "TF_PARTITION": "from-the-command-line"})
+        assert "from-the-command-line" in out.stdout, out.stdout[-2000:]
+        assert "from-the-env-file" not in out.stdout
+
+    def test_no_env_file_is_not_an_error(self, stub_path, tmp_path):
+        # `set -e` plus a test that fails is how the launcher silently exited 2
+        # before. A missing .env is the normal case, so it must not do that.
+        out = run_launcher(stub_path, tmp_path / "logs",
+                           {"TF_ENV_FILE": str(tmp_path / "absent.env")})
+        assert "This asks Slurm for a GPU" in out.stdout, (
+            f"launcher stopped before its banner; rc={out.returncode}\n{out.stdout[-2000:]}\n"
+            f"{out.stderr[-2000:]}")
+
+    def test_env_example_cannot_overwrite_your_environment(self):
+        """Every assignment in the template must be `KEY="${KEY:-default}"`.
+
+        The test above proves the *mechanism* keeps command-line precedence when
+        the file is written that way. This is the other half: that the file
+        people actually copy is written that way. A plain `WORK=/some/path` here
+        would be sourced under `set -a` and silently beat an exported WORK.
+        """
+        import re
+
+        offenders = []
+        for line in (EXT_ROOT / ".env.example").read_text().splitlines():
+            stripped = line.lstrip("# ").strip()
+            match = re.match(r'^([A-Z_][A-Z0-9_]*)=(.*)$', stripped)
+            if match and f"${{{match.group(1)}:-" not in match.group(2):
+                offenders.append(stripped)
+        assert not offenders, (
+            f"{offenders} would overwrite an exported value when sourced with `set -a`. "
+            'Write them as KEY="${KEY:-default}".')
+
+    @pytest.mark.parametrize(
+        "script",
+        ["run_comfyui.sh", "run_comfyui_slurm.sh", "env/setup.sh", "slurm/submit.sh",
+         "slurm/gpu_smoke.sbatch", "slurm/server_smoke.sbatch", "slurm/measure_resources.sbatch"],
+    )
+    def test_every_script_reads_it(self, script):
+        # Adding a seventh script and forgetting the two lines would leave one
+        # entry point ignoring the config file the docs point everyone at.
+        text = (EXT_ROOT / script).read_text()
+        assert "TF_ENV_FILE" in text, f"{script} does not source the local .env"
 
 
 class TestShellSyntax:
@@ -142,3 +224,43 @@ class TestTheSlurmLauncher:
         source = (EXT_ROOT / "run_comfyui_slurm.sh").read_text()
         assert "setsid" in source
         assert 'kill -- -"$bridge_pid"' in source
+
+
+class TestThePinsAgree:
+    """`env/setup.sh` and `env/requirements.txt` list the same versions.
+
+    They cannot be merged into one file: torch comes from
+    download.pytorch.org/whl/cu128 while everything else comes from PyPI, and the
+    JAX stack has to be resolved *before* torch is read or pip pulls a different
+    CUDA build underneath it. That needs three staged `pip install` calls, which a
+    single requirements file cannot express. So the pins live in two places, and
+    two places that must agree is the shape this repo has already paid for four
+    times over in stale smoke scripts.
+    """
+
+    def pins(self, text: str) -> set[str]:
+        """Pins from real lines only.
+
+        Both files explain the torch conflict in prose, and that prose names
+        versions -- `torch==2.6.0` (TrajectoryForcing's pin) and
+        `comfy-kitchen==0.2.31` (what forced the move). Reading those as
+        requirements is how this check first failed on two files that agree.
+        """
+        import re
+
+        code = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+        return set(re.findall(r'[a-zA-Z0-9_.-]+(?:\[[a-z0-9]+\])?==[0-9][0-9a-z.]*',
+                              "\n".join(code)))
+
+    def test_setup_sh_and_the_requirements_file_pin_the_same_versions(self):
+        from_script = self.pins((EXT_ROOT / "env" / "setup.sh").read_text())
+        from_file = self.pins((EXT_ROOT / "env" / "requirements.txt").read_text())
+        assert from_script == from_file, (
+            f"only in setup.sh: {sorted(from_script - from_file)}; "
+            f"only in env/requirements.txt: {sorted(from_file - from_script)}")
+
+    def test_there_are_pins_to_compare(self):
+        # A parser that silently matches nothing would make the check above pass
+        # for the wrong reason -- the failure mode of every stale-expectation bug
+        # in this repo so far.
+        assert len(self.pins((EXT_ROOT / "env" / "setup.sh").read_text())) >= 10

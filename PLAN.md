@@ -1,16 +1,26 @@
 # ComfyUI-TrajectoryForcing — Plan
 
 A ComfyUI custom-node extension exposing Trajectory Forcing's (TF) coarse-to-fine
-generation, per-level preview, and interactive editing as a node graph. This file
-is the plan and its pivots, same convention as `TrajectoryDreamer/PLAN.md` — read
-`README.md` for what exists and how to run it, `TrajectoryForcing/README.md` and
-the TF paper (`_koray/Trajectory-Forcing-2606.22527v1.pdf`) for the method.
+generation, per-level preview, and interactive editing as a node graph.
+
+> **What this file is.** A working record, kept as the work happened: the design
+> decisions, the ones that turned out wrong, and what the evidence was either
+> way. It is not a changelog and not marketing — sections that a later result
+> retired are marked superseded rather than deleted, because the retraction is
+> the evidence that the criteria were fixed in advance. Job ids refer to Slurm
+> runs on the cluster this was developed on; they are kept so a number can be
+> traced to the run that produced it, and they will mean nothing to you beyond
+> that.
+>
+> Read **`README.md`** for what exists and how to run it, **`CONTRIBUTING.md`**
+> for the sharp edges before changing anything, and
+> [the TF paper](https://mervekocabas.github.io/TrajectoryForcing/) for the
+> method.
 
 **Scope: TF only.** TF-2.0 (text conditioning) has zero trained checkpoints as of
-this writing (see `_latex/kickoff-slides/TF-diag.tex`, Chapter 2 TL;DR) — a
-`TF Text Encode` node would have nothing to load against, so it is deferred until
-TF-2.0 produces a checkpoint. Trajectory Dreamer (3D) is Phase 2 and not touched
-here at all.
+this writing — a `TF Text Encode` node would have nothing to load against, so it
+is deferred until TF-2.0 produces one. Trajectory Dreamer (3D) is a separate
+project and not touched here at all.
 
 ## Status — 2026-09-04
 
@@ -32,7 +42,7 @@ in `Next` stays a guess until it happens.
 
 Verification, all reproducible from this repo:
 
-- `pytest tests` — 352 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
+- `pytest tests` — 385 tests, no GPU, ~6 s. Edit math, payloads, drawing, and
   every node's schema and `execute` against a stub pipeline.
 - `slurm/gpu_smoke.sbatch` — the nodes against the real TF-L model. **8/8,
   job 449988**, including two controls: same class + seed reproduces the
@@ -42,14 +52,17 @@ Verification, all reproducible from this repo:
   which predates the nine-output cut; 7/7 on job 449604, which predates
   `TF Compare Levels` and `TF Sweep Edit`.)
 - `slurm/server_smoke.sbatch` — the workflows through a real ComfyUI server.
-  **13/13, job 449990**, 20 nodes registered, all five workflows
+  **14/14, job 450454**, 21 nodes registered, all five workflows
   executed. This is the only check that a node running several re-samples in one
-  `execute` survives ComfyUI's execution engine rather than a direct call, and
-  that the sweep's table reaches the client rather than only its images.
-  (Superseded: 13/13 on job 449981, which predates the nine-output cut; 9/9 on
-  job 449655, which predates workflow 05. Job 449989, between them, is the 12/13
-  that found the script's own hardcoded output list — see the section on the nine
-  outputs.) The first attempt (449598) was 2/6 and is
+  `execute` survives ComfyUI's execution engine rather than a direct call, that
+  the sweep's table reaches the client rather than only its images, and that
+  `TF Save Images` writes a real file through the execution engine rather than a
+  direct call — criterion 6 read `sweep.png` back off disk and found class 213
+  and seed 592 in its own PNG metadata.
+  (Superseded: 13/13 on job 449990, which predates `TF Save Images`; 13/13 on job
+  449981, which predates the nine-output cut; 9/9 on job 449655, which predates
+  workflow 05. Job 449989 is the 12/13 that found the script's own hardcoded
+  output list — see the section on the nine outputs.) The first attempt (449598) was 2/6 and is
   what found both the namespace bug below and a workflow naming an ImageNet
   class string one word off. The criteria covering the painter
   workflow's quiet stop were added after the first browser session and took five
@@ -770,6 +783,12 @@ raises. And not wiring the trajectory in is reported in the node's own body
 ("no class/seed metadata"), since silently writing untraceable files is the exact
 failure the node exists to prevent.
 
+**Verified on hardware: `server_smoke` 14/14, job 450454.** Criterion 6 came
+back `sweep.png + sweep.md ... (class 213 (Irish setter), seed 592)` — the file
+on disk, with the provenance read back out of its own PNG metadata, written by
+ComfyUI's execution engine rather than a direct call. The sheet is 1952x408, one
+baseline frame plus four arms.
+
 **`server_smoke` gained criterion 6**, written into its docstring before the run:
 05 leaves both its table and its sheet on disk under one name, and the PNG
 carries the class and seed that produced it. The directory is cleared before the
@@ -785,6 +804,166 @@ it silently stops being covered. That is the hardcoded-output-list bug of job
 449989 in a quieter form: under-checking never turns red at all.
 `test_server_smoke_expects_exactly_the_nodes_that_exist` now pins the set equal
 to the registered node ids, in the unit suite.
+
+## Making it publishable (2026-09-04)
+
+A pass over the repo asking what breaks for someone who is not me. Most of it was
+machine-specific defaults, and one item was a hard blocker nobody had noticed.
+
+**`pyproject.toml` declared a licence file that did not exist.** `license =
+{ file = "LICENSE" }` with no LICENSE in the tree: any build or registry publish
+fails on it, and without one nobody may legally use the code at all. MIT now,
+matching upstream TrajectoryForcing, so there is no compatibility question.
+
+**`WORK` defaulted to my scratch directory** in five scripts, and everything else
+derives from it -- ComfyUI, the venv, three caches. A stranger running
+`env/setup.sh` got a path they cannot write to. Now `$HOME`.
+
+**The three `.sbatch` files hardcoded an absolute `--output=` path**, and
+`#SBATCH` lines cannot expand variables, so this looked like the one thing that
+had to be edited by hand. It does not: Slurm resolves a *relative* `--output`
+against the submission directory, so `outputs/slurm_logs/%x-%j.out` works
+unchanged for anyone submitting from the repo root. `SLURM_SUBMIT_DIR` replaced
+the hardcoded `EXT` path in the same files.
+
+**Partition and QOS were the one thing a job file cannot carry.** `#SBATCH`
+lines are comments to bash, so they cannot read a variable -- which makes exactly
+the two settings that differ on every cluster the two a `.sbatch` cannot
+parameterise. Three options, and the first two are both wrong: naming them
+hardcodes one machine into the repo, and omitting them sends the job to whatever
+partition is default, which on many clusters has no GPU and fails in a way that
+does not say why. `slurm/submit.sh` reads them from `.env` and puts them on the
+sbatch command line, where they override the file. The launcher lost its
+defaults the same way -- unset now means "pass no flag", built as an array so an
+empty value contributes no argument rather than an `--partition=` Slurm rejects.
+With that, no cluster-specific string is left in `slurm/` or either launcher.
+
+**A test-isolation bug came with the `.env`, and would have made CI meaningless.**
+The launcher tests run the real script from the repo root, so the moment a `.env`
+existed there they started reading the developer's own settings. That passes
+locally and fails in CI where no `.env` exists -- or worse, passes in both for
+different reasons. `run_launcher` now points `TF_ENV_FILE` at a nonexistent path
+unless a test overrides it, so every launcher test states its own configuration.
+
+**One portability bug was live rather than cosmetic.** `run_comfyui_slurm.sh`'s
+stale-bridge sweep -- the fix for the `ncat` orphan leak that cost a debugging
+session -- identified compute nodes with `grep -oE 'mlcbm[0-9]+'`. On any cluster
+whose nodes are named differently, `node` is empty, every candidate is skipped,
+and the function silently does nothing: the leak returns with no error to explain
+it. It now reads the node out of the bridge's own `--sh-exec ncat <node> <port>`
+command line, which is what it should always have keyed on.
+
+**`.env` and `.env.example`.** Thirteen environment variables existed across the
+scripts and nodes; the README documented four, and `WORK` -- the most important
+-- was not one of them. `.env.example` is the committed template carrying all of
+them with their real defaults; `.env` is the gitignored copy every script sources
+if present. That is what lets the committed defaults stay generic while a
+developer keeps their own paths, and it means the README can point at one file
+instead of restating a list that would drift.
+
+**The manual TrajectoryForcing clone is gone.** Most people will arrive through
+ComfyUI Manager, which installs this extension and nothing else -- so "now clone
+a second repository" was a wall in front of the first run, and one the Manager
+gives no way to satisfy. `locate.fetch_tf_repo` fetches it on first use. Three
+decisions in it are worth recording:
+
+- **An existing checkout always wins.** `$TF_REPO`, then a sibling directory,
+  then the fetch. Quietly making a second copy would also mean re-downloading the
+  2 GB RAE decoder that lives inside it, which is a worse failure than the
+  missing-checkout error it replaces.
+- **`git init` + `fetch <sha>`, not `clone --depth 1`.** A shallow clone takes
+  whatever `main` points at on the day of the install, which is exactly the
+  version drift the pin exists to prevent -- the extension calls into TF's own
+  API, so an upstream change is a change here. A test asserts `TF_REPO_COMMIT` is
+  a full 40-character sha, because a branch name there would silently unpin it.
+- **A failed fetch removes what it made.** Otherwise the next attempt takes the
+  "exists but is not a checkout" branch and needs a human to delete a directory.
+
+**And it announces itself.** The fetch is the one slow thing that happens with no
+node on screen -- TF Load Pipeline's progress bar does not start until the
+checkout is found -- which is the same shape as the silent slow load that got
+reported as a hang. It logs at INFO, which ComfyUI prints and the launchers now
+keep in a rolling file.
+
+**The `.env` mechanism had a bug, found by deciding to test it.** The sourcing
+snippet went into six scripts carrying the comment "anything already exported
+wins over it" -- which was simply false. The scripts source with `set -a`, so a
+plain `KEY=value` in the file *overwrites* a value exported on the command line;
+the precedence was backwards from what the comment claimed and from what anyone
+would expect. Fixed on the template side rather than the sourcing side:
+`.env.example` now writes every line as `KEY="${KEY:-default}"`, so
+`WORK=/scratch ./run_comfyui.sh` still wins. Writing the test is what surfaced
+it -- the comment had been read three times without anyone noticing it described
+the opposite of the behaviour.
+
+Then the test found a second one. Asserting the *mechanism* keeps precedence
+says nothing about whether the file people copy is written the safe way, so a
+second check reads `.env.example` itself -- and immediately failed on seven
+commented-out lines that had not been converted. Uncommenting any of them, which
+is exactly what they are there for, would have clobbered an exported value.
+
+`TF_ENV_FILE` exists so those tests can point at a temp file: a test writing
+`.env` into the repo root would destroy the developer's own. All three checks
+were verified to fail on the real bug -- and the missing-file one reproduces the
+`serve.sh` signature exactly, empty stdout and exit 1 with nothing printed, when
+the `[[ -f ]]` guard is replaced by a bare `source ... 2>/dev/null`.
+
+Also: CI (`tests` on push, lint split out so the common failure answers fast),
+`.comfyignore` so the registry archive drops `tests/`, `slurm/`, `scripts/` and
+`.github/`, a `publish.yml` that is deliberately inert (`workflow_dispatch` only,
+automatic trigger commented out), and this file's own header rewritten to say
+what it is -- a working record, job ids and all -- rather than reading as a
+private lab notebook someone published by accident.
+
+**Corrected:** an earlier draft of the README described this extension as
+independent of the TF authors. It is not. It is built in collaboration with them
+as part of ongoing joint work towards TF-2.0; the ECCV 2026 paper is theirs and
+does not include me. The README says that now.
+
+## Publishing, second pass (2026-09-04)
+
+Working through what breaks for a stranger turned up one thing that would have
+broken *their* setup rather than ours.
+
+**`requirements.txt` was a loaded gun.** ComfyUI Manager pip-installs a custom
+node's `requirements.txt` into whatever venv ComfyUI is running in. Ours listed
+`torch==2.8.0`, `torchvision`, `torchaudio` and the whole `jax[cuda12]` stack --
+so clicking "install" on this node would have rewritten torch and the CUDA
+runtime libraries underneath every *other* custom node in that install. The user
+would have seen their working ComfyUI break, from a node they had just tried.
+
+The file turned out to be **consumed by nothing in this repo**: `env/setup.sh`
+installs those pins inline and its one `-r` is ComfyUI's own requirements, not
+ours. So it was pure documentation that Manager mistakes for instructions. Moved
+to `env/requirements.txt`; the top-level file is now comments only, explaining
+why a line there is installed into other people's environments. A test asserts it
+has no installable line.
+
+That leaves a Manager install half-done rather than harmful, so the other half
+had to be made legible: `pipeline.check_runtime_deps` fails with the command that
+fixes it instead of a `ModuleNotFoundError` from inside TrajectoryForcing. It
+uses `find_spec` rather than an import, because importing jax initialises its GPU
+backend and `configure_jax_env` has to run first -- a test pins that too.
+
+**And the pins now live in two files that must agree.** They cannot be merged:
+torch comes from download.pytorch.org while the rest comes from PyPI, and the JAX
+stack has to resolve before torch is read, which needs three staged `pip install`
+calls rather than one requirements file. Two places that must agree is the exact
+shape this repo has paid for four times in stale smoke scripts, so a test
+compares them -- and its first run failed on two files that *do* agree, because
+the parser was reading version numbers out of the prose explaining the torch
+conflict. Comments stripped; verified to fail on real drift.
+
+**The README claimed Windows support it does not have.** `jax[cuda12]` ships no
+native-Windows wheels, so Windows works only through WSL2. Corrected in both
+READMEs -- the kind of error that generates issues from people who cannot
+install.
+
+Also: repo description and topics set, a CI badge, and the startup fetch
+documented as a startup fetch. It cannot be deferred to first generate: the
+loader's config dropdown and the ImageNet class list are built from the checkout
+while node schemas are defined, so it has to be present before the nodes are
+published.
 
 ## Next
 

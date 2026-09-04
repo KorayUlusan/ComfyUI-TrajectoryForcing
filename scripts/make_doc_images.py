@@ -6,7 +6,7 @@ contact sheets into docs/img/. Committed because they are documentation, but
 regenerable, so a change in what the model does is one command away from being
 visible in the README rather than quietly contradicted by it.
 
-    sbatch slurm/gpu_smoke.sbatch     # produces the frames
+    ./slurm/submit.sh slurm/gpu_smoke.sbatch   # produces the frames
     python scripts/make_doc_images.py # assembles them
 """
 from __future__ import annotations
@@ -16,6 +16,9 @@ from pathlib import Path
 
 EXT_ROOT = Path(__file__).resolve().parent.parent
 SRC = EXT_ROOT / "outputs" / "gpu_smoke"
+# This script owns docs/img/*.png by generated name and rewrites them on every
+# run. Hand-made assets go in a subdirectory -- docs/img/logo/ -- so a run
+# cannot overwrite one.
 OUT = EXT_ROOT / "docs" / "img"
 
 BG = (17, 26, 43)

@@ -25,6 +25,9 @@ scripts/                workflow generator, smoke tests, measurement
 slurm/                  the GPU jobs those run under
 tests/                  pytest; no GPU needed
 web/                    the one piece of frontend code; see below
+.env.example            every environment variable, with its default
+.comfyignore            what the registry archive leaves out
+.github/workflows/      tests on push; publish is present but not enabled
 ```
 
 The split that matters: `data.py`, `tokens.py` and `render.py` import neither
@@ -34,11 +37,18 @@ logic there and let `nodes_*.py` stay a thin schema-and-wiring layer.
 ## Tests
 
 ```bash
-pytest tests                      # 352 tests, no GPU, ~5 s
-sbatch slurm/gpu_smoke.sbatch     # the nodes against the real model
-sbatch slurm/server_smoke.sbatch  # the workflows through a real ComfyUI server
-sbatch slurm/measure_resources.sbatch   # the README's VRAM table
+pytest tests                                   # 385 tests, no GPU, ~6 s
+./slurm/submit.sh slurm/gpu_smoke.sbatch       # the nodes against the real model
+./slurm/submit.sh slurm/server_smoke.sbatch    # the workflows through a real server
+./slurm/submit.sh slurm/measure_resources.sbatch   # the README's VRAM table
 ```
+
+`submit.sh` rather than plain `sbatch` because `#SBATCH` lines are comments to
+bash and cannot read a variable — which makes partition and QOS, the two settings
+that differ on every cluster, the one thing a `.sbatch` file cannot parameterise.
+The wrapper reads them from `.env` and puts them on the command line, where they
+override the file. Plain `sbatch` still works if your cluster's default partition
+has GPUs.
 
 `tests/pytest.ini` makes `tests/` the rootdir on purpose: the repository root is
 itself an importable package (ComfyUI loads `__init__.py` as the custom node's
@@ -64,9 +74,9 @@ Write exit criteria into a script's docstring before the run, not after.
 
 ---
 
-## Four sharp edges
+## Five sharp edges
 
-All four cost a debugging session. Each is commented where it bites; this is
+All five cost a debugging session. Each is commented where it bites; this is
 the index.
 
 ### 1. TrajectoryForcing and ComfyUI both own a top-level `utils`
@@ -116,6 +126,28 @@ Three separate traps, all in `TFTokensFromMask`:
 What works: **one `ExecutionBlocker(None)` per declared output**, the reason
 carried as the node's own `ui` text, and `has_intermediate_output=True` so the
 text survives the cached re-run.
+
+### 4. The Painter's backdrop is a *preview*, not the wire
+
+`usePainter.ts` resolves the image behind the brush with
+`nodeOutputStore.getNodeImageUrls(node.getInputNode(0))` — the stored UI preview
+of whatever feeds its `image` slot. A node that returns an IMAGE but publishes
+no preview leaves the Painter blank, which is why `TF Level Canvas` returns
+`ui.PreviewImage` with `has_intermediate_output=True`. Two consequences: the
+Painter's image input must be socket 0, and the widget itself only exists under
+ComfyUI's Vue rendering (`Comfy.VueNodes.Enabled`, readable from
+`user/*/comfy.settings.json`, which is how the canvas node knows to warn).
+
+### 5. Killing a listener does not free its port
+
+`ncat --keep-open` forks a child per connection and each fork inherits the
+listening socket, so killing the leader leaves the port bound by orphans that
+outlive the session. `run_comfyui_slurm.sh` runs the bridge under `setsid` and kills the
+**process group**. Anything else that forks per connection needs the same care.
+
+The same background process was also writing to the terminal while `srun --pty`
+held it in raw mode, which produced stair-stepped, half-overwritten output — it
+logs to a file now.
 
 ---
 
@@ -204,6 +236,71 @@ is one of a handful of fixed choices that do not depend on which checkpoint is
 loaded, make it a combo and skip the sentinel entirely; otherwise use `-1` and
 pay the three disclosures.
 
+## Releasing
+
+`.github/workflows/publish.yml` publishes to the Comfy Registry. **It is not
+enabled**: it carries only a `workflow_dispatch` trigger, so nothing you push can
+cut a release. Its header comments say how to turn the automatic trigger on, and
+the registry refuses to re-publish an existing version — so the `version` bump in
+`pyproject.toml` is the actual release switch.
+
+**Nothing publishes unless the tests pass.** `publish.yml` calls `tests.yml` as a
+reusable workflow (`uses: ./.github/workflows/tests.yml`) and the publish job
+`needs:` it, so ruff and the full suite run first and a failure stops the release.
+The relative path matters: it runs the tests from *the commit being published*,
+not from whatever `main` holds. A `workflow_run` trigger would have fired after
+any tests.yml run finished and needed extra logic to tie that result back to the
+right commit; this needs none.
+
+What that green tick means is bounded, and worth being clear about: lint and the
+CPU suite. It does **not** mean the GPU smoke tests passed — those need an H100
+and are submitted by hand. Run `./slurm/submit.sh slurm/gpu_smoke.sbatch` and
+`./slurm/submit.sh slurm/server_smoke.sbatch` before bumping the version, and put
+the job ids in PLAN.md.
+
+The registry listing's icon is `docs/img/logo/icon.png`, referenced by absolute
+raw-GitHub URL in `pyproject.toml` because the registry renders it outside the
+repo. `docs/img/logo/favicon.svg` is the source of truth; regenerate the PNG with
+
+```bash
+convert -background none -density 1200 docs/img/logo/favicon.svg -resize 256x256 docs/img/logo/icon.png
+python -c "from PIL import Image; p='docs/img/logo/icon.png'; Image.open(p).save(p, optimize=True)"
+```
+
+The optimize pass matters: ImageMagick writes 142 KB for that gradient and PIL
+re-encodes the same pixels to ~20 KB. Do not quantise it — 256 colours puts
+visible banding across the sheen.
+
+**Do not restore `dominant-baseline="central"` to the `<text>`.** librsvg — which
+`rsvg-convert`, ImageMagick and most CLI rasterisers use — ignores it outright
+(rendering with and without it is byte-identical), so it read the `y` as a
+baseline and pushed the glyphs 7 SVG units above centre. Browsers honour it, so
+the mark looked right in a tab and wrong in every exported PNG. It is positioned
+by explicit baseline instead: `y = 26 + capHeight/2`, which is geometry and holds
+across the whole font fallback stack. The comment in the file has the details.
+After any change to the mark, check the centring rather than eyeballing it:
+
+```python
+import numpy as np; from PIL import Image
+a = np.asarray(Image.open("docs/img/logo/icon.png").convert("RGBA")).astype(int)
+m = (a[...,0]>245)&(a[...,1]>245)&(a[...,2]>245)&(a[...,3]>200)
+ys, xs = np.nonzero(m); h, w = a.shape[:2]
+print(xs.min(), w-1-xs.max(), ys.min(), h-1-ys.max())   # left right top bottom
+```
+
+`.comfyignore` decides what the archive contains. The rule is "would a user of
+the nodes ever open this file?", which keeps every `.md` and `docs/img/` (README
+is the listing's own body) and drops `tests/`, `slurm/`, `scripts/` and
+`.github/`.
+
+**Bumping the TrajectoryForcing pin.** `TF_REPO_COMMIT` in `tf_nodes/locate.py`
+is the upstream commit a fresh install fetches. It is a full sha, and a test
+asserts that — a branch name there would make every new install track a moving
+target, and since this extension calls into TF's own API an upstream change is a
+change here. To move it: bump the sha, run
+`./slurm/submit.sh slurm/gpu_smoke.sbatch`, and record the job id in PLAN.md. An existing checkout (`$TF_REPO`, or a sibling
+directory) always wins over the fetch, so your own working copy is unaffected.
+
 ## Nodes show their own results
 
 An `info` output is unreachable unless the node that computed it shows it:
@@ -260,6 +357,26 @@ to appear in its `CONSUMERS` map naming the input it feeds, and that input is
 checked to exist with a matching type. Adding a convenient `io.Int.Output`
 fails the suite until you can say where it goes.
 
+## Dependencies
+
+**Never put an installable line in the top-level `requirements.txt`.** ComfyUI
+Manager pip-installs it into whatever venv ComfyUI is running in, so a line there
+rewrites torch and the CUDA libraries underneath every *other* custom node in
+someone's install — breaking working setups in a way that has nothing to do with
+this node. The file is comments-only and a test enforces that.
+
+Dependencies go in `env/requirements.txt`, which `env/setup.sh` installs staged:
+TrajectoryForcing's JAX stack first so ComfyUI's unpinned torch line is already
+satisfied, then torch from download.pytorch.org, then the rest. The two files
+list the same pins and a test keeps them in step — they cannot be merged, because
+one requirements file cannot express three installs from two indexes in a fixed
+order.
+
+The practical consequence, which the README states for users: a Manager install
+registers the nodes and stops at *TF Load Pipeline*, where
+`pipeline.check_runtime_deps` names `bash env/setup.sh`. Half-done and harmless
+beats convenient and destructive.
+
 ## Adding a node
 
 1. Put the logic in `tokens.py` or `render.py` if it is pure; only wiring goes
@@ -277,28 +394,6 @@ not paper over a degenerate result either: `TFFeatureEdit` raises on an empty
 target rather than passing it through, because an edit that completes having
 changed nothing is indistinguishable from an edit that had no effect, and that
 is a research error rather than a UI one.
-
-### 4. The Painter's backdrop is a *preview*, not the wire
-
-`usePainter.ts` resolves the image behind the brush with
-`nodeOutputStore.getNodeImageUrls(node.getInputNode(0))` — the stored UI preview
-of whatever feeds its `image` slot. A node that returns an IMAGE but publishes
-no preview leaves the Painter blank, which is why `TF Level Canvas` returns
-`ui.PreviewImage` with `has_intermediate_output=True`. Two consequences: the
-Painter's image input must be socket 0, and the widget itself only exists under
-ComfyUI's Vue rendering (`Comfy.VueNodes.Enabled`, readable from
-`user/*/comfy.settings.json`, which is how the canvas node knows to warn).
-
-### 5. Killing a listener does not free its port
-
-`ncat --keep-open` forks a child per connection and each fork inherits the
-listening socket, so killing the leader leaves the port bound by orphans that
-outlive the session. `run_comfyui_slurm.sh` runs the bridge under `setsid` and kills the
-**process group**. Anything else that forks per connection needs the same care.
-
-The same background process was also writing to the terminal while `srun --pty`
-held it in raw mode, which produced stair-stepped, half-overwritten output — it
-logs to a file now.
 
 ## Regenerating the workflows and figures
 

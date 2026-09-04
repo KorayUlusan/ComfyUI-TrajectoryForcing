@@ -10,10 +10,21 @@
 # Order is the whole point. TrajectoryForcing's pinned JAX stack goes in first,
 # so that when ComfyUI's unpinned `torch` / `torchvision` lines are resolved they
 # are already satisfied and pip does not pull a different CUDA build underneath
-# jax. See requirements.txt for the one pin that had to move, and why.
+# jax. See env/requirements.txt for the one pin that had to move, and why.
 set -euo pipefail
 
-WORK="${WORK:-/weka/geiger/gwb965}"
+EXT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Local overrides, if you made one: `cp .env.example .env`. Gitignored, so your
+# paths never reach a commit. .env.example writes every line as
+# `KEY="${KEY:-default}"`, so a value exported on the command line still wins.
+# TF_ENV_FILE points somewhere else -- one file per cluster, say.
+TF_ENV_FILE="${TF_ENV_FILE:-$EXT_DIR/.env}"
+if [[ -f "$TF_ENV_FILE" ]]; then
+  set -a; . "$TF_ENV_FILE"; set +a
+fi
+
+WORK="${WORK:-$HOME}"
 VENV="${COMFY_VENV:-$WORK/.venvs/comfyui-tf}"
 COMFY="${COMFY_DIR:-$WORK/ComfyUI}"
 PY="${PYTHON:-/usr/bin/python3.11}"
@@ -31,7 +42,7 @@ echo "=== [1/4] TrajectoryForcing's JAX stack ==="
   "jax[cuda12]==0.4.36" "flax==0.10.4" "optax==0.2.5" "orbax-checkpoint==0.11.0" \
   "chex==0.1.87" "ml_dtypes==0.5.1" "tensorstore==0.1.76" "ml_collections==1.1.0"
 
-echo "=== [2/4] torch (cu128, above TF's own pin -- see requirements.txt) ==="
+echo "=== [2/4] torch (cu128, above TF's own pin -- see env/requirements.txt) ==="
 "$VENV/bin/pip" install "torch==2.8.0" "torchvision==0.23.0" "torchaudio==2.8.0" \
   --index-url https://download.pytorch.org/whl/cu128
 

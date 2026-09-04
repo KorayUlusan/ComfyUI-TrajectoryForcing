@@ -54,6 +54,9 @@ htmlcov/
 .venv
 venv/
 ENV/
+# .env is your machine's paths: `cp .env.example .env`. Every script sources it
+# if present, and keeping it untracked is what lets the committed defaults stay
+# generic. .env.example is the tracked template and is not matched by this rule.
 .env
 .envrc
 

@@ -1,0 +1,61 @@
+name: tests
+
+# The suite needs no GPU and runs in about five seconds locally. What costs
+# time here is the environment: importing the node layer pulls `comfy_api`,
+# which pulls torch, av, einops, safetensors and comfy-kitchen. So the lint job
+# is split out to give a fast answer on the common failure, and the test job
+# installs ComfyUI's own requirements against a CPU torch wheel.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # Callable from publish.yml, so a release runs these first and runs them from
+  # the same commit it is about to publish. Adding this changes nothing about
+  # how the workflow behaves on a push.
+  workflow_call:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ComfyUI-TrajectoryForcing
+
+      # Shallow, and only for its Python packages: nothing here starts a
+      # server. `tests/conftest.py` finds it at ../ComfyUI relative to the
+      # extension, which is the layout checked out above.
+      - uses: actions/checkout@v4
+        with:
+          repository: comfyanonymous/ComfyUI
+          path: ComfyUI
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # CPU wheels: the tests exercise schemas, edit maths and drawing, none of
+      # which touches a device. JAX is not installed at all -- `tf_nodes.pipeline`
+      # imports it lazily inside functions, so nothing the suite reaches needs it.
+      - name: Install
+        run: |
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install -r ComfyUI/requirements.txt
+          pip install pytest
+
+      - name: pytest
+        run: pytest ComfyUI-TrajectoryForcing/tests -q
