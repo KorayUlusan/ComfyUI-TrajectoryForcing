@@ -60,21 +60,31 @@ the rest for model weights that download on first use.
 
 ## Install
 
-```bash
-git clone https://github.com/comfyanonymous/ComfyUI ~/ComfyUI
-git clone https://github.com/KorayUlusan/ComfyUI-TrajectoryForcing ~/ComfyUI-TrajectoryForcing
-ln -s ~/ComfyUI-TrajectoryForcing ~/ComfyUI/custom_nodes/ComfyUI-TrajectoryForcing
+Everything goes in one folder. Pick where, and nothing is written outside it —
+uninstalling later is deleting that folder.
 
-cd ~/ComfyUI-TrajectoryForcing
-bash env/setup.sh      # ~10 min, ~11 GB, prints a lot
-./run_comfyui.sh
+```bash
+export TF_HOME="$HOME/trajectory-forcing"    # anywhere you like
+
+python3.11 -m venv "$TF_HOME/cli"
+"$TF_HOME/cli/bin/pip" install comfy-cli
+"$TF_HOME/cli/bin/comfy" --workspace "$TF_HOME/ComfyUI" install --nvidia
+"$TF_HOME/cli/bin/comfy" --workspace "$TF_HOME/ComfyUI" \
+    node install --mode remote comfyui-trajectoryforcing
+
+cd "$TF_HOME/ComfyUI/custom_nodes/comfyui-trajectoryforcing"
+COMFY_DIR="$TF_HOME/ComfyUI" COMFY_VENV="$TF_HOME/venv" bash env/setup.sh   # ~10 min, ~11 GB
+COMFY_DIR="$TF_HOME/ComfyUI" COMFY_VENV="$TF_HOME/venv" ./run_comfyui.sh
 ```
 
 Then open **http://localhost:8188**. An empty grey canvas is ComfyUI.
 
-The Trajectory Forcing model code is not in that list. The extension fetches it
-itself, pinned to a known-good version. If you already have a copy, run
-`cp .env.example .env` and set `TF_REPO` in it.
+Typing those two variables every time gets old: `cp .env.example .env`, put them
+in there, and every script picks them up.
+
+The Trajectory Forcing model code is not downloaded by any of the above. The
+extension fetches it itself on first use, pinned to a known-good version. If you
+already have a copy, set `TF_REPO` in that same `.env`.
 
 <details>
 <summary>If something went wrong</summary>
@@ -95,7 +105,7 @@ Anything else: [README → Troubleshooting](../README.md#troubleshooting).
 **1. Load a diagram.** Use **Workflow → Open** at the top left, then pick:
 
 ```
-~/ComfyUI-TrajectoryForcing/workflows/01-generate-and-decode.json
+$TF_HOME/ComfyUI/custom_nodes/comfyui-trajectoryforcing/workflows/01-generate-and-decode.json
 ```
 
 **2. Press Run**, at the bottom of the screen. The first run loads the model and

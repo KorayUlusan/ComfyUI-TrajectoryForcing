@@ -4,6 +4,35 @@ For changing this extension. To use it, read [README.md](README.md).
 
 ---
 
+## A checkout ComfyUI loads
+
+The README installs the published package. To change it you want the git tree
+itself on the node path, so edits are live and `git status` is the truth:
+
+```bash
+export TF_HOME="$PWD/comfy-tf"
+
+python3.11 -m venv "$TF_HOME/cli"
+"$TF_HOME/cli/bin/pip" install comfy-cli
+"$TF_HOME/cli/bin/comfy" --workspace "$TF_HOME/ComfyUI" install --nvidia
+
+git clone https://github.com/KorayUlusan/ComfyUI-TrajectoryForcing "$TF_HOME/src"
+ln -s "$TF_HOME/src" "$TF_HOME/ComfyUI/custom_nodes/ComfyUI-TrajectoryForcing"
+
+cd "$TF_HOME/src"
+cp .env.example .env     # set COMFY_DIR and COMFY_VENV to the two paths above
+bash env/setup.sh
+./run_comfyui.sh
+```
+
+A symlink, not a copy: a copy means editing one tree and running the other, and
+the two disagree in exactly the way that wastes an afternoon.
+
+Do not install the registry package into the same workspace. Two copies of these
+nodes register the same names and which one wins is not defined.
+
+---
+
 ## Layout
 
 ```
@@ -374,13 +403,18 @@ drops `tests/`, `slurm/`, `scripts/` and `.github/`.
 listing renders outside the repo.
 
 ```bash
-convert -background none -density 1200 docs/img/logo/favicon.svg -resize 256x256 docs/img/logo/icon.png
+convert -background none -density 2400 docs/img/logo/favicon.svg -resize 400x400 docs/img/logo/icon.png
 python -c "from PIL import Image; p='docs/img/logo/icon.png'; Image.open(p).save(p, optimize=True)"
 ```
 
-The optimize pass matters. ImageMagick writes 142 KB for that gradient and PIL
-re-encodes the same pixels to about 20 KB. Do not quantise it: 256 colours bands
-the sheen visibly.
+400 is not a preference, it is the registry's documented maximum icon resolution.
+Rendering larger does not look sharper in the Manager, it fails the spec. The
+density is deliberately far above the output size so the rasteriser has room
+before the downsample.
+
+The optimize pass matters. ImageMagick writes several hundred KB for that
+gradient and PIL re-encodes the same pixels to about 32 KB. Do not quantise it:
+256 colours bands the sheen visibly.
 
 Do not restore `dominant-baseline="central"` to the `<text>`. librsvg ignores it
 outright, and rendering with and without it is byte-identical, so it read the `y`

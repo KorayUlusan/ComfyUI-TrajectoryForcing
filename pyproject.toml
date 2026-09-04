@@ -2,7 +2,12 @@
 name = "comfyui-trajectoryforcing"
 description = "Trajectory Forcing's coarse-to-fine generation and interactive latent-token editing as ComfyUI nodes."
 version = "0.1.1"
-license = { file = "LICENSE" }
+# A PEP 639 SPDX identifier, not `{ file = "LICENSE" }`. Both are valid per the
+# registry spec, but comfy-cli's serialize_license prefers `file` when it is set
+# and ships the dict verbatim, so the listing page showed the literal string
+# {"file": "LICENSE"} where the licence name belongs. A plain string arrives as
+# {"text": "MIT"}, which is what comfy-cli's own scaffolding generates.
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.11"
 # Deliberately empty. The heavy dependencies (JAX, flax, torch, transformers)
@@ -18,8 +23,9 @@ Repository = "https://github.com/korayulusan/ComfyUI-TrajectoryForcing"
 [tool.comfy]
 PublisherId = "korayulusan"
 DisplayName = "Trajectory Forcing"
-# Square PNG, served from the repo -- resolves once the repo is public.
-# Source of truth is docs/img/logo/favicon.svg; see CONTRIBUTING.md.
+# Square PNG, served from the repo. 400x400, which is the registry's stated
+# maximum -- larger is not sharper here, it is rejected. Source of truth is
+# docs/img/logo/favicon.svg; see CONTRIBUTING.md.
 Icon = "https://raw.githubusercontent.com/KorayUlusan/ComfyUI-TrajectoryForcing/main/docs/img/logo/icon.png"
 
 [tool.ruff]

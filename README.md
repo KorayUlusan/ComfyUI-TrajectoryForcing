@@ -7,8 +7,14 @@
 **Coarse-to-fine image generation you can look inside, edit, and re-sample, as a node graph.**
 
 [![tests](https://img.shields.io/github/actions/workflow/status/KorayUlusan/ComfyUI-TrajectoryForcing/tests.yml?branch=main&label=tests&logo=github)](https://github.com/KorayUlusan/ComfyUI-TrajectoryForcing/actions/workflows/tests.yml)
+[![version](https://img.shields.io/github/v/tag/KorayUlusan/ComfyUI-TrajectoryForcing?label=version&color=0b7285)](https://github.com/KorayUlusan/ComfyUI-TrajectoryForcing/releases)
+[![registry](https://img.shields.io/badge/Comfy%20Registry-Trajectory%20Forcing-0b7285)](https://registry.comfy.org/nodes/comfyui-trajectoryforcing)
+[![installs](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.comfy.org%2Fnodes%2Fcomfyui-trajectoryforcing&query=%24.downloads&label=installs&color=0b7285)](https://registry.comfy.org/nodes/comfyui-trajectoryforcing)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 [![python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
+[![CUDA](https://img.shields.io/badge/CUDA-12-76b900.svg?logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
+[![platform](https://img.shields.io/badge/platform-Linux%20%7C%20WSL2-lightgrey.svg?logo=linux&logoColor=white)](#install)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-custom%20nodes-1a1a1a.svg)](https://github.com/comfyanonymous/ComfyUI)
 [![paper](https://img.shields.io/badge/paper-ECCV%202026-b31b1b.svg)](https://mervekocabas.github.io/TrajectoryForcing/)
 
@@ -53,17 +59,89 @@ is a node graph.
 > answer. Most current ComfyUI builds ship CUDA 13, which `jax 0.4.36` cannot
 > use, so expect to need this.
 
-```bash
-git clone https://github.com/comfyanonymous/ComfyUI ~/ComfyUI
-git clone https://github.com/KorayUlusan/ComfyUI-TrajectoryForcing ~/ComfyUI-TrajectoryForcing
-ln -s ~/ComfyUI-TrajectoryForcing ~/ComfyUI/custom_nodes/ComfyUI-TrajectoryForcing
+### Let a coding agent do it
 
-cd ~/ComfyUI-TrajectoryForcing
-bash env/setup.sh     # ~10 min, ~11 GB
-./run_comfyui.sh      # http://localhost:8188
+Paste this into Claude Code, Codex, Gemini CLI or whatever you use. It covers
+the three things that are easy to get wrong and expensive to undo.
+
+```text
+Install the ComfyUI node pack "Trajectory Forcing" on this machine.
+
+  repo:        https://github.com/KorayUlusan/ComfyUI-TrajectoryForcing
+  registry id: comfyui-trajectoryforcing
+
+Read that repo's README "Install" section and follow it. Before you start, check
+nvidia-smi, python3.11, and 25 GB free; stop and tell me if any are missing.
+
+Ask me first whether to use a ComfyUI I already have or build a fresh one in its
+own folder, then follow only that route.
+
+Rules:
+- Never change my existing torch, and never pip install into a venv I did not
+  point you at. If install.py declines, build the separate venv with
+  env/setup.sh instead. Declining is a normal outcome, not an error to route
+  around.
+- Pass --mode remote to `comfy node install`, and run `comfy` with no
+  virtualenv active.
+
+If this is a cluster login node (sinfo/sbatch exist, nvidia-smi finds no GPU),
+do not try to run ComfyUI here and do not treat the missing GPU as a failed
+install. Install only, then ask me for the partition and QOS, put them in .env
+as TF_PARTITION and TF_QOS, and tell me to launch with ./run_comfyui_slurm.sh.
+
+Stop once ComfyUI is serving, or once the install is done on a login node.
+Report the URL, the ComfyUI directory, the venv path, and the command to start
+it again. Do not open a workflow, run a graph, submit a job, or download model
+weights: those cost GPU time and happen on first use anyway.
 ```
 
+### Already running ComfyUI
+
+Manager → search **Trajectory Forcing** → Install. Or:
+
+```bash
+comfy node install --mode remote comfyui-trajectoryforcing
+```
+
+### What happens on the next restart
+
+The nodes register, then `install.py` reports one of two things: it added the
+JAX stack and you are ready, or it changed nothing and printed why. If it
+declined, build a separate environment with the route below. Either way your
+existing ComfyUI is left exactly as it was.
+
+### Starting from nothing
+
+Everything lands under one directory you pick, and nothing is written outside
+it. Change `TF_HOME` to taste.
+
+```bash
+export TF_HOME="$PWD/comfy-tf"
+
+python3.11 -m venv "$TF_HOME/cli"
+"$TF_HOME/cli/bin/pip" install comfy-cli
+"$TF_HOME/cli/bin/comfy" --workspace "$TF_HOME/ComfyUI" install --nvidia
+"$TF_HOME/cli/bin/comfy" --workspace "$TF_HOME/ComfyUI" \
+    node install --mode remote comfyui-trajectoryforcing
+
+cd "$TF_HOME/ComfyUI/custom_nodes/comfyui-trajectoryforcing"
+COMFY_DIR="$TF_HOME/ComfyUI" COMFY_VENV="$TF_HOME/venv" bash env/setup.sh
+COMFY_DIR="$TF_HOME/ComfyUI" COMFY_VENV="$TF_HOME/venv" ./run_comfyui.sh
+```
+
+Rather than repeating those two variables, put them in a `.env`: copy
+`.env.example` and edit. Every script here reads it.
+
 Model code and weights are fetched on first use. Nothing else to download.
+
+> [!TIP]
+> `--mode remote` is not optional. ComfyUI-Manager ships a cached node list
+> inside its own wheel, and a package newer than that wheel is simply not in it,
+> so the install fails with `not found in` and no explanation.
+>
+> Also run `comfy` with no virtualenv active. It resolves `$VIRTUAL_ENV` ahead
+> of `--workspace`, so from an activated shell it installs into that
+> environment and ignores the flag.
 
 | | |
 |---|---|
