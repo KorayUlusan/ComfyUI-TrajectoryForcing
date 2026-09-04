@@ -246,6 +246,17 @@ def download_default_checkpoint() -> str:
     target = root / HF_CKPT_FILE
     if target.exists():
         return str(target)
+
+    # Say so before starting. This is about 2 GB with no output of its own, on
+    # the first run, from a node that has already been sitting on "loading" for
+    # a minute compiling XLA -- silence there is indistinguishable from a hang,
+    # and the usual response to a hang is to kill it and start again.
+    import logging
+
+    logging.getLogger(__name__).info(
+        "TrajectoryForcing: downloading the %s checkpoint (about 2 GB) into %s. "
+        "First run only; later runs reuse it.", HF_CKPT_FILE, root,
+    )
     return hf_hub_download(
         repo_id=os.environ.get("TF_CKPT_REPO", HF_CKPT_REPO),
         filename=os.environ.get("TF_CKPT_FILE", HF_CKPT_FILE),

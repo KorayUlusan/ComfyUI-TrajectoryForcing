@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -112,6 +113,56 @@ def check_startup_problems() -> None:
     raise RuntimeError(f"{problem.title}\n\n{problem.detail}\n\n-> {problem.fix}")
 
 
+#: Substrings that mean "the card is full", from either framework. Matched on
+#: the message rather than the exception class so that nothing here has to
+#: import jax or torch to recognise one -- and so a jaxlib that renames
+#: XlaRuntimeError again does not silently stop being handled.
+_OOM_SIGNS = (
+    "RESOURCE_EXHAUSTED",
+    "out of memory",
+    "OutOfMemory",
+    "CUDA_ERROR_OUT_OF_MEMORY",
+    "failed to allocate",
+)
+
+_OOM_ADVICE = """TrajectoryForcing needs about 6.6 GiB at peak on its own: 2.5 for the model,
+4.6 once the sampler has compiled, 6.6 once the RAE decoder is built. Two
+trajectories held for an edit do not add to that. Measured on an H100 by
+scripts/measure_resources.py.
+
+So on a card with room for the model, this almost always means something else
+in the graph is holding VRAM:
+
+  * Keep this the only model in the workflow. ComfyUI does not know about JAX's
+    allocation and will happily load a checkpoint into memory JAX has taken.
+  * If you must share, cap JAX and tell ComfyUI to stay clear:
+        TF_XLA_MEM_FRACTION=0.5 TF_RESERVE_VRAM=8 ./run_comfyui.sh
+    Capping requires preallocation, so this trades flexibility for a hard
+    ceiling; it is off by default because it costs memory on a card that does
+    not need it.
+  * On an 8 GB card, decode one level at a time (TF Decode Levels -> final
+    only, or TF Latent Preview -> which) rather than all four.
+
+python -m tf_nodes.doctor prints the card and how much it has."""
+
+
+@contextmanager
+def _vram_advice(what: str):
+    """Turn an allocator failure into something a user can act on.
+
+    An XLA OOM is a page of buffer arithmetic and assignment tables, and the one
+    thing it does not say is what to do. The original is chained, so it is still
+    there for a bug report.
+    """
+    try:
+        yield
+    except Exception as exc:  # noqa: BLE001 - re-raised either way
+        text = f"{type(exc).__name__}: {exc}"
+        if not any(sign.lower() in text.lower() for sign in _OOM_SIGNS):
+            raise
+        raise RuntimeError(f"{what} ran out of GPU memory.\n\n{_OOM_ADVICE}") from exc
+
+
 class TFPipeline:
     """One loaded TrajectoryForcing model, shared by every node that references it."""
 
@@ -133,6 +184,20 @@ class TFPipeline:
             checkpoint_name, config_name, self.load_seconds,
         )
 
+        # TrajectoryForcing fetches the RAE decoder itself, lazily, at the first
+        # decode -- which happens inside warm_up, behind a progress bar that has
+        # no idea it is waiting on 1.6 GB. Work out now whether that is coming,
+        # while there is still somewhere to say it.
+        self.decoder_will_download = bool(
+            self.decoder_path and not Path(self.decoder_path).exists()
+        )
+        if self.decoder_will_download:
+            log.info(
+                "TrajectoryForcing: the RAE decoder is not on disk yet, so the first "
+                "decode will download about 1.6 GB into %s. First run only.",
+                Path(self.decoder_path).parent,
+            )
+
     @property
     def num_levels(self) -> int:
         return int(self._pipe.num_levels)
@@ -153,7 +218,7 @@ class TFPipeline:
 
     # ----- inference -----
     def generate(self, class_id: int, seed: int) -> np.ndarray:
-        with tf_scope():
+        with _vram_advice("Generating a trajectory"), tf_scope():
             return np.asarray(self._pipe.generate(int(class_id), seed=int(seed)), dtype=np.float32)
 
     def resume(self, latents: np.ndarray, start_level: int, class_id: int, seed: int) -> np.ndarray:
@@ -165,7 +230,7 @@ class TFPipeline:
         """
         arr = np.asarray(latents, dtype=np.float32)
         level = int(start_level)
-        with tf_scope():
+        with _vram_advice("Resuming from an edited level"), tf_scope():
             out = self._pipe.edit(
                 arr, arr, level, level, [(0, 0)], [(0, 0)],
                 class_id=int(class_id), seed=int(seed),
@@ -173,7 +238,9 @@ class TFPipeline:
         return np.asarray(out, dtype=np.float32)
 
     def decode(self, latents: np.ndarray, final_only: bool) -> list[np.ndarray]:
-        with tf_scope():
+        # The decoder is the peak: it is what takes the 4.6 GiB after compiling
+        # to the 6.6 GiB the README quotes.
+        with _vram_advice("Decoding levels to images"), tf_scope():
             if final_only:
                 return [np.asarray(self._pipe.decode_last(latents), dtype=np.uint8)]
             return [np.asarray(x, dtype=np.uint8) for x in self._pipe.decode_all(latents)]
@@ -203,6 +270,10 @@ class TFPipeline:
         compiled = time.perf_counter()
         if on_step:
             on_step("sampler compiled")
+        if on_step and getattr(self, "decoder_will_download", False):
+            # The bar is the only thing the user can see, so the one stage that
+            # takes minutes rather than seconds should say why.
+            on_step("downloading RAE decoder (~1.6 GB, first run)")
         self.decode(levels, final_only=True)
         if on_step:
             on_step("decoder built")
