@@ -311,7 +311,7 @@ def vue_nodes_enabled() -> bool | None:
     return found
 
 
-def rae_root() -> str:
+def rae_root(allow_fetch: bool = True) -> str:
     """Directory the RAE decoder weights are read from (and downloaded into).
 
     Prefers a copy already sitting in the TrajectoryForcing checkout -- the
@@ -323,7 +323,15 @@ def rae_root() -> str:
     override = os.environ.get("TF_RAE_ROOT", "").strip()
     if override:
         return str(Path(override).expanduser())
-    in_repo = tf_repo() / RAE_SUBDIR
-    if (in_repo / "decoders").is_dir():
+    # `allow_fetch` is passed through so a caller that is only *reporting* paths
+    # cannot trigger a clone. This is a path query, and by the time it matters in
+    # production the checkout is already resolved and memoised -- but the doctor
+    # calls it on a machine that may have nothing, and cloning several hundred MB
+    # to answer "where would the decoder live" is not a diagnostic.
+    try:
+        in_repo = tf_repo(allow_fetch=allow_fetch) / RAE_SUBDIR
+    except FileNotFoundError:
+        in_repo = None
+    if in_repo is not None and (in_repo / "decoders").is_dir():
         return str(in_repo)
     return str(model_roots()[0] / RAE_SUBDIR)

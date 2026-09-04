@@ -179,7 +179,7 @@ def _weights() -> tuple[str, str]:
         )
         lines.append(f"{root}: {', '.join(entries) if entries else 'empty'}")
         missing = missing or not entries
-    decoder = Path(rae_root()) / "decoders"
+    decoder = Path(rae_root(allow_fetch=False)) / "decoders"
     lines.append(f"RAE decoder: {decoder}{'' if decoder.is_dir() else '  (absent)'}")
     # Absent weights are not a problem: they download on first use. Saying so is
     # the point, since 3.5 GB of silence otherwise looks like a hang.

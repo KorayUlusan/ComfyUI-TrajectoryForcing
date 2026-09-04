@@ -84,6 +84,32 @@ class TestItDoesNotDisturbWhatItMeasures:
             pass
         assert not called
 
+    def test_a_full_run_never_clones(self, monkeypatch, tmp_path):
+        """CI caught this one, and the local suite could not.
+
+        `_checkout` passed allow_fetch=False, which looked like enough. But
+        `_weights` reaches `rae_root()`, which called `tf_repo()` with fetching
+        allowed -- so on a runner with no checkout the doctor cloned upstream
+        while answering "where would the decoder live". Here every candidate is
+        an empty temp directory and git is an error, so the machine running the
+        test cannot hide it the way a dev box does.
+        """
+        from tf_nodes import locate
+
+        monkeypatch.setattr(locate, "EXT_ROOT", tmp_path / "ext")
+        monkeypatch.setattr(locate, "TF_REPO_FETCH_DIR", tmp_path / "ext" / "TrajectoryForcing")
+        monkeypatch.setattr(locate, "_TF_REPO", None)
+        monkeypatch.delenv("TF_REPO", raising=False)
+        monkeypatch.delenv("TF_RAE_ROOT", raising=False)
+
+        def boom(*a, **k):
+            raise AssertionError("the doctor tried to clone TrajectoryForcing")
+
+        monkeypatch.setattr(locate, "_git", boom)
+        monkeypatch.setattr(locate, "fetch_tf_repo", boom)
+
+        doctor.run()  # must not raise, and must not reach either boom
+
     def test_it_does_not_change_the_environment(self, monkeypatch):
         """The regression that turned CI red.
 
