@@ -199,6 +199,15 @@ def _installer_note() -> tuple[str, str]:
     return WARN, SETUP_MARKER.read_text(encoding="utf8", errors="replace").strip()
 
 
+def _duplicates() -> tuple[str, str]:
+    from .health import _duplicate_install_problem
+
+    problem = _duplicate_install_problem()
+    if problem is None:
+        return OK, "one copy"
+    return WARN, problem.detail.replace("\n", "\n       ")
+
+
 def run(devices: bool = False) -> Findings:
     f = Findings()
     f.check("python", _python, "These nodes are built and tested on 3.11.")
@@ -214,6 +223,7 @@ def run(devices: bool = False) -> Findings:
     )
     f.check("weights", _weights, "Absent weights download on first run; allow ~3.5 GB and time.")
     f.check("disk", _disk, "First run downloads ~3.5 GB of weights.")
+    f.check("copies installed", _duplicates, "Remove or rename one, then restart ComfyUI.")
     f.check("installer note", _installer_note, "Delete SETUP-REQUIRED.txt once it no longer applies.")
     return f
 

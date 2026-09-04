@@ -138,12 +138,56 @@ def _checkout_problem(report: Report) -> Problem | None:
         )
 
 
+def _duplicate_install_problem() -> Problem | None:
+    """A second copy of these nodes in the same custom_nodes/.
+
+    Easy to end up with: clone the repo to work on it, then install the registry
+    package to try something, and now two directories register the same node
+    names. ComfyUI does not say which won, so edits appear to do nothing, or a
+    bug fixed in one tree keeps happening. Cheap to detect, unreasonably
+    annoying to diagnose.
+
+    Keyed on a file the package always has rather than on the directory name,
+    since the registry unpacks to `comfyui-trajectoryforcing` and a git clone is
+    usually `ComfyUI-TrajectoryForcing` -- the same name check that would look
+    obvious here is the one that misses the case worth catching.
+    """
+    marker = Path("tf_nodes") / "nodes.py"
+    try:
+        siblings = sorted(EXT_ROOT.parent.iterdir())
+    except OSError:
+        return None
+
+    twins = []
+    for entry in siblings:
+        try:
+            if entry.name.endswith(".disabled") or entry.resolve() == EXT_ROOT:
+                continue
+            if (entry / marker).is_file():
+                twins.append(entry)
+        except OSError:
+            continue
+    if not twins:
+        return None
+    return Problem(
+        title="These nodes are installed twice",
+        detail=(
+            f"This copy: {EXT_ROOT}\nAlso found: "
+            + "\n            ".join(str(t) for t in twins)
+            + "\nBoth register the same node names, and which one ComfyUI uses is "
+            "not defined."
+        ),
+        fix="Remove or rename one of them, then restart ComfyUI.",
+    )
+
+
 def collect() -> Report:
     """Everything wrong with this install. Never raises."""
     report = Report()
     for problem in (
         _checkout_problem(report),
         _dependency_problem(),
+        _duplicate_install_problem(),
         _setup_marker_problem(),
     ):
         if problem is not None:

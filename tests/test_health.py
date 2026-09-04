@@ -173,3 +173,64 @@ class TestTheBannerIsWorthReading:
         looking for a broken download."""
         break_checkout(monkeypatch)
         assert "registered either way" in health.format_report(health.collect())
+
+
+class TestASecondCopyIsNoticed:
+    """Two installs register the same node names, and ComfyUI picks silently.
+
+    The symptom is that edits appear to do nothing, or a fix keeps not taking.
+    Nothing about that points at the cause, so it is worth saying outright.
+    """
+
+    def _fake_tree(self, tmp_path, *names, ext="ComfyUI-TrajectoryForcing"):
+        custom_nodes = tmp_path / "custom_nodes"
+        for name in (ext, *names):
+            (custom_nodes / name / "tf_nodes").mkdir(parents=True)
+            (custom_nodes / name / "tf_nodes" / "nodes.py").write_text("")
+        return custom_nodes / ext
+
+    def test_one_copy_is_not_a_problem(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(health, "EXT_ROOT", self._fake_tree(tmp_path))
+        assert health._duplicate_install_problem() is None
+
+    def test_a_second_copy_is_reported(self, tmp_path, monkeypatch):
+        root = self._fake_tree(tmp_path, "comfyui-trajectoryforcing")
+        monkeypatch.setattr(health, "EXT_ROOT", root)
+        problem = health._duplicate_install_problem()
+        assert problem is not None
+        assert "comfyui-trajectoryforcing" in problem.detail
+
+    def test_the_registry_and_git_names_differ_which_is_the_point(self, tmp_path, monkeypatch):
+        """A name-based check would miss exactly the case worth catching: the
+        registry unpacks lowercase, a clone is usually CamelCase."""
+        root = self._fake_tree(tmp_path, "comfyui-trajectoryforcing")
+        monkeypatch.setattr(health, "EXT_ROOT", root)
+        assert root.name != "comfyui-trajectoryforcing"
+        assert health._duplicate_install_problem() is not None
+
+    def test_a_disabled_copy_is_ignored(self, tmp_path, monkeypatch):
+        """ComfyUI-Manager disables by renaming; a disabled pack registers
+        nothing, so warning about it would be noise."""
+        root = self._fake_tree(tmp_path, "comfyui-trajectoryforcing.disabled")
+        monkeypatch.setattr(health, "EXT_ROOT", root)
+        assert health._duplicate_install_problem() is None
+
+    def test_an_unrelated_custom_node_is_ignored(self, tmp_path, monkeypatch):
+        root = self._fake_tree(tmp_path)
+        (root.parent / "some-other-pack").mkdir()
+        (root.parent / "some-other-pack" / "__init__.py").write_text("")
+        monkeypatch.setattr(health, "EXT_ROOT", root)
+        assert health._duplicate_install_problem() is None
+
+    def test_an_unreadable_parent_is_not_fatal(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(health, "EXT_ROOT", tmp_path / "gone" / "ext")
+        assert health._duplicate_install_problem() is None
+
+    def test_a_duplicate_does_not_block_a_node(self, tmp_path, monkeypatch):
+        """It is worth saying, but the nodes do work -- one of them, anyway.
+        Refusing to run would be a worse outcome than the ambiguity."""
+        root = self._fake_tree(tmp_path, "comfyui-trajectoryforcing")
+        monkeypatch.setattr(health, "EXT_ROOT", root)
+        monkeypatch.setattr(health, "missing_runtime_deps", lambda: [])
+        health.report_at_startup()
+        assert health.blocking_problem() is None

@@ -227,7 +227,12 @@ def contact_sheet(frames, max_row: int = SHEET_MAX_ROW) -> np.ndarray:
     """
     frames = [np.asarray(f, dtype=np.uint8) for f in frames]
     if not frames:
-        raise ValueError("A contact sheet needs at least one frame.")
+        raise ValueError(
+            "A contact sheet needs at least one frame, and none arrived. Check the "
+            "node feeding it actually produced images: a sweep whose arms were all "
+            "skipped, or a decode with `which` set to a level that does not exist, "
+            "both hand on an empty batch."
+        )
     if len(frames) == 1:
         return frames[0]
     h, w = frames[0].shape[:2]

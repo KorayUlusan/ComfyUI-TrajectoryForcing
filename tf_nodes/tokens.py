@@ -72,7 +72,10 @@ def mask_to_tokens(mask_hw: np.ndarray, grid: tuple[int, int], coverage: float) 
     """
     mask = np.asarray(mask_hw, dtype=np.float32)
     if mask.ndim != 2:
-        raise ValueError(f"Expected a 2D mask, got {mask.shape}")
+        raise ValueError(
+            f"Expected a 2D mask [H,W], got shape {mask.shape}. A MASK from the Painter "
+            "arrives as [B,H,W]; take one frame, or wire a MASK output rather than an IMAGE."
+        )
     gh, gw = int(grid[0]), int(grid[1])
     h, w = mask.shape
     if h < gh or w < gw:
@@ -190,9 +193,16 @@ def combine(a: TokenSelection, b: TokenSelection | None, op: str) -> TokenSelect
     if op == "invert":
         return TokenSelection(mask=~a.mask, note=f"invert({a.note})", level=a.level)
     if b is None:
-        raise ValueError(f"Operation {op!r} needs a second selection.")
+        raise ValueError(
+            f"Operation {op!r} needs a second selection; only one was wired. "
+            "Connect both `a` and `b`, or switch to 'invert', which takes one."
+        )
     if a.mask.shape != b.mask.shape:
-        raise ValueError(f"Cannot combine {a.mask.shape} with {b.mask.shape}.")
+        raise ValueError(
+            f"Cannot combine a {a.mask.shape} selection with a {b.mask.shape} one: "
+            "both must come from the same token grid. Check the two selections were "
+            "made at the same level."
+        )
     level = _combined_level(a, b)
     if op == "union":
         mask = a.mask | b.mask
@@ -203,7 +213,10 @@ def combine(a: TokenSelection, b: TokenSelection | None, op: str) -> TokenSelect
     elif op == "symmetric difference":
         mask = a.mask ^ b.mask
     else:
-        raise ValueError(f"Unknown combine op {op!r}.")
+        raise ValueError(
+            f"Unknown combine op {op!r}. Use one of: "
+            "union, intersection, symmetric difference, invert."
+        )
     return TokenSelection(mask=mask, note=f"{op}({a.note}, {b.note})", level=level)
 
 
@@ -219,12 +232,19 @@ def source_feature(canvas: np.ndarray, selection: TokenSelection, mode: str) -> 
     """
     picked = canvas[selection.mask]  # [n, C]
     if picked.shape[0] == 0:
-        raise ValueError("Source selection is empty.")
+        raise ValueError(
+            "The source selection is empty, so there is no feature to copy. "
+            "Check the `what was selected` preview: coordinates outside the grid, or a "
+            "painted area below the coverage threshold, both select nothing."
+        )
     if mode == "region mean":
         return picked.mean(axis=0, keepdims=True)
     if mode == "token cycle":
         return picked
-    raise ValueError(f"Unknown source mode {mode!r}.")
+    raise ValueError(
+        f"Unknown source mode {mode!r}. Use 'region mean' (the paper's edit) or "
+        "'token cycle' (a token-for-token copy)."
+    )
 
 
 def write_feature(

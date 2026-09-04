@@ -314,7 +314,11 @@ class TFLoadLevels(io.ComfyNode):
     def execute(cls, file, path_override) -> io.NodeOutput:
         path = Path(path_override.strip()) if path_override.strip() else _output_dir() / file
         if not path.is_file():
-            raise FileNotFoundError(f"No saved trajectory at {path}")
+            raise FileNotFoundError(
+                f"No saved trajectory at {path}. TF Save Levels writes into "
+                f"{_output_dir()}; pick a file from the dropdown, or set path_override "
+                "to an absolute .npz."
+            )
         with np.load(path, allow_pickle=True) as data:
             dirty = int(data["dirty_level"])
             levels = LevelStack(
