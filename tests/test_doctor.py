@@ -72,7 +72,7 @@ class TestItDoesNotDisturbWhatItMeasures:
 
     def test_looking_for_the_checkout_does_not_clone(self, monkeypatch):
         """A diagnostic that silently downloads is doing something unasked, at
-        the worst moment. `_checkout` sets TF_NO_AUTO_FETCH before looking."""
+        the worst moment. Asked via `allow_fetch=False`, not the env var."""
         called = []
         from tf_nodes import locate
 
@@ -83,6 +83,31 @@ class TestItDoesNotDisturbWhatItMeasures:
         except Exception:  # noqa: BLE001 - a missing checkout is fine, a clone is not
             pass
         assert not called
+
+    def test_it_does_not_change_the_environment(self, monkeypatch):
+        """The regression that turned CI red.
+
+        `_checkout` used to `os.environ.setdefault("TF_NO_AUTO_FETCH", "1")`,
+        which is process-wide. Every test that ran afterwards then found
+        fetching disabled, and on a runner -- where there is no checkout until
+        something fetches one -- eighteen of them failed a long way from the
+        cause. It passed here only because a sibling checkout exists locally and
+        no fetch was ever needed.
+
+        Nothing in this module may write to os.environ. A probe that changes what
+        it is probing is not a probe.
+        """
+        import os
+
+        before = dict(os.environ)
+        try:
+            doctor.run()
+        except Exception:  # noqa: BLE001 - a broken install is the normal case here
+            pass
+        assert dict(os.environ) == before, (
+            "doctor mutated the environment: "
+            f"{set(os.environ.items()) ^ set(before.items())}"
+        )
 
 
 class TestTheReportIsActionable:

@@ -121,7 +121,7 @@ def fetch_tf_repo(dest: Path = TF_REPO_FETCH_DIR, progress=None) -> Path:
     return dest
 
 
-def tf_repo(progress=None) -> Path:
+def tf_repo(progress=None, allow_fetch: bool = True) -> Path:
     """The TrajectoryForcing checkout this extension runs against.
 
     Everything (model code, configs, the RAE decoder sources) is imported from
@@ -129,6 +129,13 @@ def tf_repo(progress=None) -> Path:
     upstream instead of a stale copy of its math. An existing checkout is always
     preferred over fetching one -- `$TF_REPO` first, then a sibling of this
     extension -- so nobody ends up with two copies of a 2 GB decoder.
+
+    `allow_fetch=False` asks the same question without the fetch, for callers
+    that only want to *report* whether a checkout is here: a diagnostic that
+    quietly downloads several hundred MB is doing something nobody asked for.
+    It is an argument rather than `TF_NO_AUTO_FETCH`, because setting that from
+    library code changes the whole process -- which is exactly what broke CI:
+    the doctor's probe disabled fetching for every test that ran after it.
     """
     global _TF_REPO
     if _TF_REPO is not None:
@@ -139,9 +146,14 @@ def tf_repo(progress=None) -> Path:
             _TF_REPO = path
             return _TF_REPO
         tried.append(f"  {label}: {path}")
-    if os.environ.get("TF_NO_AUTO_FETCH", "").strip():
+    if not allow_fetch or os.environ.get("TF_NO_AUTO_FETCH", "").strip():
+        why = (
+            "TF_NO_AUTO_FETCH is set"
+            if os.environ.get("TF_NO_AUTO_FETCH", "").strip()
+            else "fetching was not permitted for this call"
+        )
         raise FileNotFoundError(
-            "Could not find the TrajectoryForcing checkout, and TF_NO_AUTO_FETCH is set. "
+            f"Could not find the TrajectoryForcing checkout, and {why}. "
             "Tried:\n" + "\n".join(tried)
             + "\nSet TF_REPO to the directory containing pmf.py and editing_env/."
         )

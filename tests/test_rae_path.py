@@ -20,7 +20,6 @@ all eight smoke criteria. These tests are what keep that true.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -134,14 +133,15 @@ class TestTheRewrittenPathKeepsTheDownloadMarker:
 def _tf_rae_decoder() -> Path | None:
     """TrajectoryForcing's decoder module, if a checkout is already present.
 
-    Auto-fetch is suppressed: a test suite that clones 2 GB of upstream on a
-    cold CI runner is a worse problem than the one this checks for.
+    Auto-fetch is suppressed for this call only. Setting TF_NO_AUTO_FETCH here
+    would disable it for the whole pytest process, and the tests that genuinely
+    need a checkout run afterwards -- on CI, where there is none until something
+    fetches it.
     """
-    os.environ.setdefault("TF_NO_AUTO_FETCH", "1")
     try:
         from tf_nodes import locate
 
-        path = locate.tf_repo() / "utils" / "rae_decoder.py"
+        path = locate.tf_repo(allow_fetch=False) / "utils" / "rae_decoder.py"
     except Exception:
         return None
     return path if path.is_file() else None

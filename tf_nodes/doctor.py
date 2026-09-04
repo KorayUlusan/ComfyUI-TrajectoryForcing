@@ -25,7 +25,6 @@ script.
 from __future__ import annotations
 
 import argparse
-import os
 import platform
 import shutil
 import sys
@@ -129,10 +128,12 @@ def _jax_devices() -> tuple[str, str]:
 def _checkout() -> tuple[str, str]:
     from .locate import TF_REPO_COMMIT, tf_repo
 
-    # Suppressed: a diagnostic that silently clones several hundred MB is doing
-    # something the user did not ask for, at the worst possible moment.
-    os.environ.setdefault("TF_NO_AUTO_FETCH", "1")
-    path = tf_repo()
+    # Asked without fetching: a diagnostic that silently clones several hundred
+    # MB is doing something the user did not ask for, at the worst possible
+    # moment. Via the argument, never by setting TF_NO_AUTO_FETCH here -- that
+    # is process-wide, and doing it from this probe disabled fetching for every
+    # test that ran afterwards, which is how CI went red.
+    path = tf_repo(allow_fetch=False)
     head = "unknown"
     git = shutil.which("git")
     if git:
