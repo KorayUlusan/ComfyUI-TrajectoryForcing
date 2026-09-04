@@ -213,6 +213,67 @@ those two on the command line. `#SBATCH` lines cannot read a variable, so they a
 the one setting a job file cannot carry portably.
 </details>
 
+## Updating
+
+Manager → **Update**, or:
+
+```bash
+comfy node update --mode remote comfyui-trajectoryforcing
+```
+
+Two things an update deliberately does not do for you, both because they would
+mean touching things you may have set up yourself:
+
+**The pinned TrajectoryForcing commit.** `tf_repo()` returns the first checkout
+it finds and never compares it to `TF_REPO_COMMIT`, so if a release moves the
+pin, your existing checkout stays where it is. That is on purpose — silently
+re-fetching model code under someone is worse than leaving it — but it means
+nothing tells you unless you ask:
+
+```bash
+python -m tf_nodes.doctor        # the TrajectoryForcing row names both commits
+```
+
+To take the new pin, delete the checkout inside the extension and restart
+ComfyUI, which re-fetches it:
+
+```bash
+rm -rf TrajectoryForcing         # only if it was auto-fetched; not a $TF_REPO of your own
+```
+
+**The venv.** `env/setup.sh` refuses to touch one that already exists, because a
+half-resolved mix of the JAX and torch pins is far harder to diagnose than a
+rebuild. If `env/requirements.txt` changed, remove the venv and re-run it.
+
+Your `.env` and the auto-fetched `TrajectoryForcing/` both live inside the
+extension directory, so keep a copy of `.env` if you are about to remove and
+reinstall rather than update in place.
+
+<details>
+<summary>Let a coding agent do it</summary>
+
+```text
+Update the ComfyUI node pack "Trajectory Forcing" on this machine.
+
+  repo:        https://github.com/KorayUlusan/ComfyUI-TrajectoryForcing
+  registry id: comfyui-trajectoryforcing
+
+Find the existing install first and tell me where it is. Run `comfy node update`
+with --mode remote, and run `comfy` with no virtualenv active.
+
+Afterwards run `python -m tf_nodes.doctor` from the extension directory, with the
+venv that runs ComfyUI, and show me the output. Two rows matter:
+- TrajectoryForcing: if it names a commit different from the pin, say so and ask
+  me before deleting the checkout to re-fetch it.
+- jax stack / torch: if env/requirements.txt changed in this update, say so and
+  ask before rebuilding the venv. setup.sh will not touch an existing one.
+
+Do not delete or rebuild anything without asking. Do not start ComfyUI, run a
+graph, or download weights. Back up .env before anything that replaces the
+extension directory.
+```
+</details>
+
 ## Configuration: the `.env` file
 
 Nothing has to be set if ComfyUI, the venv and this extension are where

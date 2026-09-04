@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-trajectoryforcing"
 description = "Trajectory Forcing's coarse-to-fine generation and interactive latent-token editing as ComfyUI nodes."
-version = "0.1.2"
+version = "0.1.3"
 # A PEP 639 SPDX identifier, not `{ file = "LICENSE" }`. Both are valid per the
 # registry spec, but comfy-cli's serialize_license prefers `file` when it is set
 # and ships the dict verbatim, so the listing page showed the literal string
