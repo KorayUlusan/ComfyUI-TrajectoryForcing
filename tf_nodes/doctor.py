@@ -41,6 +41,8 @@ _MARK = {OK: "  ok  ", WARN: " note ", BAD: " FAIL "}
 
 #: One string, so the same advice from several failing checks collapses to one
 #: line instead of three near-identical ones.
+from .health import SETUP_MARKER  # noqa: E402 - re-exported so tests can redirect it
+
 SETUP_FIX = "bash env/setup.sh -- builds a venv with a matching torch and the JAX stack."
 
 
@@ -177,13 +179,29 @@ def _model_roots() -> list[Path]:
         import folder_paths
 
         return [Path(folder_paths.models_dir) / MODELS_FOLDER]
+    except ImportError:
+        # No ComfyUI on the path at all. That is the ordinary case for
+        # `python -m tf_nodes.doctor` from a shell, which is how the README
+        # tells people to run it, so it is a gap in what can be answered here --
+        # not a fault in the install.
+        raise _NoComfyUI from None
+
+
+class _NoComfyUI(Exception):
+    """ComfyUI is not importable from here, so its model paths cannot be read."""
 
 
 def _weights() -> tuple[str, str]:
     from .locate import rae_root
 
+    try:
+        roots = _model_roots()
+    except _NoComfyUI:
+        return WARN, ("cannot be read from outside a ComfyUI process "
+                      "(no folder_paths); run with ComfyUI on PYTHONPATH to see them")
+
     lines, missing = [], False
-    for root in _model_roots():
+    for root in roots:
         entries = (
             [e.name for e in sorted(root.iterdir()) if e.name not in (".cache", "checkpoints")]
             if root.is_dir()
@@ -205,11 +223,19 @@ def _disk() -> tuple[str, str]:
 
 
 def _installer_note() -> tuple[str, str]:
-    from .health import SETUP_MARKER
-
     if not SETUP_MARKER.exists():
         return OK, "none"
-    return WARN, SETUP_MARKER.read_text(encoding="utf8", errors="replace").strip()
+    text = SETUP_MARKER.read_text(encoding="utf8", errors="replace").strip()
+
+    # install.py writes this under ComfyUI-Manager's interpreter, which on the
+    # documented route is not the venv that runs the model -- so a note saying
+    # the stack is missing is routinely read where it is false. Judge it here
+    # rather than repeating it: ComfyUI clears it at the next start.
+    from .health import missing_runtime_deps
+
+    if not missing_runtime_deps():
+        return OK, "a stale note is present; ComfyUI removes it at the next start"
+    return WARN, text
 
 
 def _duplicates() -> tuple[str, str]:
@@ -236,7 +262,9 @@ def run(devices: bool = False) -> Findings:
         "Nothing to do unless you want a specific checkout: set TF_REPO to one "
         "holding pmf.py and editing_env/.",
     )
-    f.check("weights", _weights, "Absent weights download on first run; allow ~3.5 GB and time.")
+    f.check("weights", _weights,
+            "Weights download on first run (~3.5 GB); run this inside ComfyUI to see "
+            "which are already there.")
     f.check("disk", _disk, "First run downloads ~3.5 GB of weights.")
     f.check("copies installed", _duplicates, "Remove or rename one, then restart ComfyUI.")
     f.check("installer note", _installer_note, "Delete SETUP-REQUIRED.txt once it no longer applies.")

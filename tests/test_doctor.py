@@ -232,3 +232,50 @@ class TestExpectedStatesAreNotFailures:
         fake_torch_without_a_gpu(monkeypatch)
         status, _ = doctor._gpu()
         assert status == doctor.BAD
+
+
+class TestItReportsWhatItCannotSee:
+    """Two more rows that said FAIL on a healthy install.
+
+    Reported from an update check run the way the README says to run it --
+    `python -m tf_nodes.doctor` from a shell, with the venv that runs ComfyUI.
+    `folder_paths` only exists inside a ComfyUI process, so the weights row died
+    with ModuleNotFoundError and took the exit code with it; and the installer's
+    note was repeated as something to act on in an environment where it was
+    already false.
+    """
+
+    def test_no_comfyui_on_the_path_is_a_note_not_a_failure(self, monkeypatch):
+        def no_comfy():
+            raise doctor._NoComfyUI
+
+        monkeypatch.setattr(doctor, "_model_roots", no_comfy)
+        status, detail = doctor._weights()
+        assert status == doctor.WARN
+        assert "folder_paths" in detail
+
+    def test_a_note_that_is_already_false_is_not_something_to_act_on(
+        self, monkeypatch, tmp_path
+    ):
+        from tf_nodes import health
+
+        monkeypatch.setattr(health, "SETUP_MARKER", tmp_path / "SETUP-REQUIRED.txt")
+        monkeypatch.setattr(doctor, "SETUP_MARKER", tmp_path / "SETUP-REQUIRED.txt")
+        monkeypatch.setattr(health, "missing_runtime_deps", lambda: [])
+        health.write_setup_marker("torch 2.14.0+cu130 needs CUDA 13")
+
+        status, detail = doctor._installer_note()
+        assert status == doctor.OK
+        assert "stale" in detail
+
+    def test_a_note_that_is_still_true_is_still_reported(self, monkeypatch, tmp_path):
+        from tf_nodes import health
+
+        monkeypatch.setattr(health, "SETUP_MARKER", tmp_path / "SETUP-REQUIRED.txt")
+        monkeypatch.setattr(doctor, "SETUP_MARKER", tmp_path / "SETUP-REQUIRED.txt")
+        monkeypatch.setattr(health, "missing_runtime_deps", lambda: ["jax"])
+        health.write_setup_marker("run env/setup.sh")
+
+        status, detail = doctor._installer_note()
+        assert status == doctor.WARN
+        assert "setup.sh" in detail
