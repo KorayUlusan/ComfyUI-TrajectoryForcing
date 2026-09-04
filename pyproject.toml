@@ -6,7 +6,7 @@ name = "comfyui-trajectoryforcing"
 # strength of the description alone gets a node that refuses to run. Say that
 # where they will read it.
 description = "Coarse-to-fine generation and interactive latent-token editing from Trajectory Forcing, as ComfyUI nodes. Needs CUDA 12 and its own Python environment -- read the README on GitHub before installing."
-version = "0.1.5"
+version = "0.1.6"
 # A PEP 639 SPDX identifier, not `{ file = "LICENSE" }`. Both are valid per the
 # registry spec, but comfy-cli's serialize_license prefers `file` when it is set
 # and ships the dict verbatim, so the listing page showed the literal string
