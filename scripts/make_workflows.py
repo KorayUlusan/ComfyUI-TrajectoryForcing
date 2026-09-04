@@ -109,8 +109,13 @@ class Graph:
             "outputs": [],
             "properties": {},
             "widgets_values": [text.strip() + "\n"],
-            "color": "#432",
-            "bgcolor": "#653",
+            # Dark, deliberately. These carry a screenful of prose each, and the
+            # default MarkdownNote colouring is ComfyUI's yellow preset -- a
+            # mid-tone body under light text, which is the worst case for
+            # reading. #2a2a2a sits between the canvas and an ordinary node, so
+            # the note still reads as a panel rather than a hole in the graph.
+            "color": "#222",
+            "bgcolor": "#2a2a2a",
             **({"title": title} if title else {}),
         })
         return node_id

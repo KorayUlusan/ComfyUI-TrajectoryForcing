@@ -24,8 +24,8 @@
       "widgets_values": [
         "# 4. Change a region's shape, not its content\n\n**Press Run \u2014 this one works as-is.**\n\nThe other edits change *what* a region looks like. This one changes *where it\nends*. Tokens are handed from one region to a neighbour: they take on the\nreceiving region's average feature, so the boundary moves and nothing new is\ninvented.\n\nTwo selections, both on the 16\u00d716 token grid:\n\n- **tokens to hand over** \u2014 the ones that change sides.\n- **one token in the receiving region** \u2014 anywhere inside the region that is\n  taking them. The whole region it names supplies the feature.\n\nThey must name **different** regions, or the node stops and says so.\n\n**Look at the region map preview first** to see where the boundaries actually\nare, then pick coordinates on either side of one.\n"
       ],
-      "color": "#432",
-      "bgcolor": "#653",
+      "color": "#222",
+      "bgcolor": "#2a2a2a",
       "title": "README \u2014 read me first"
     },
     {

@@ -24,8 +24,8 @@
       "widgets_values": [
         "# 1. Generate and look\n\n**Start here.** Press **Run** and wait \u2014 the first run loads the model and takes\n1\u20132 minutes. Later runs take about a second.\n\nTrajectory Forcing does not paint an image in one go. It builds one in four\npasses, coarse to fine:\n\n| level | what it decides |\n|---|---|\n| 0 | object vs. background |\n| 1 | parts |\n| 2 | subparts |\n| 3 | the finest detail |\n\nEvery level can be decoded to a picture, which is what the two preview strips on\nthe right show you. That is the whole point of the method: the intermediate\nsteps are things you can *look at*, and in the other workflows, edit.\n\n**Try:** change the class in *TF ImageNet Class*, or the seed in *TF Generate*.\n"
       ],
-      "color": "#432",
-      "bgcolor": "#653",
+      "color": "#222",
+      "bgcolor": "#2a2a2a",
       "title": "README \u2014 read me first"
     },
     {

@@ -24,8 +24,8 @@
       "widgets_values": [
         "# 2. Edit a region, keep the rest\n\n**Press Run \u2014 this one works as-is, no painting needed.**\n\nTwo images are generated: a **target** (the one being edited) and a **source**\n(where the new content comes from). The edit takes the average feature of a\npatch of the source and writes it into a region of the target, at level 2.\nThen every finer level is re-sampled from that edited canvas, so the model\nmakes the change *fit* rather than pasting a rectangle.\n\nLevels below the edit are untouched \u2014 an edit only ever propagates upward.\n\n**Advanced widgets show `(-1 = auto)`** \u2014 that means the node works the value\nout for itself, and it prints which it chose. Leave them alone unless you want\nsomething specific.\n\n**Try, in the yellow group:**\n- *target region*: change `7,7` to another `row,col` on the 16\u00d716 grid. It snaps\n  to the whole region containing that token. Every preview here is numbered\n  along its top and left edge, so you can read a coordinate off rather than\n  count cells.\n- *source tokens*: `6,6:9` means row 6, columns 6 through 9.\n- *TF Feature Edit \u2192 level*: 0\u20133. Lower = a bigger, more semantic change.\n- *strength*: below 1.0 blends instead of replacing.\n\nThe bottom-right preview shows exactly which tokens were selected, drawn on the\nlevel you edited. Check it if a result surprises you.\n\n*TF Compare Levels* at the far bottom answers \"did it actually do anything\":\ntokens changed per level, and a heatmap of where. An edit at level 2 should\nleave levels 0 and 1 completely untouched.\n\nThe edit's `level` is wired from *TF Region Map* rather than typed twice \u2014 a\nselection snapped to one level's regions is refused at another, because the\ntoken grid is the same size at every level and it would otherwise land on the\nwrong part of the image without complaining.\n"
       ],
-      "color": "#432",
-      "bgcolor": "#653",
+      "color": "#222",
+      "bgcolor": "#2a2a2a",
       "title": "README \u2014 read me first"
     },
     {
