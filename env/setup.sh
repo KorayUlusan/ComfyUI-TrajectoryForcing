@@ -72,6 +72,34 @@ PY
 # has already been followed.
 rm -f "$EXT_DIR/SETUP-REQUIRED.txt"
 
+# --- record what was built, so the launchers do not have to be told again ----
+# Without this, every later `./run_comfyui.sh` depends on the reader repeating
+# COMFY_DIR and COMFY_VENV, and forgetting them is silent: the defaults are
+# $HOME-based, so the launcher starts some *other* ComfyUI with some other venv
+# and loads a different copy of these nodes. That has happened. This script was
+# handed both paths, so it is the right place to write them down.
+ENV_FILE="${TF_ENV_FILE:-$EXT_DIR/.env}"
+"$VENV/bin/python" - "$ENV_FILE" "$COMFY" "$VENV" <<'PY'
+import pathlib, re, sys
+
+path, comfy, venv = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+text = path.read_text() if path.is_file() else (
+    "# Written by env/setup.sh. Shell syntax; the KEY=\"${KEY:-default}\" form\n"
+    "# means anything exported on the command line still wins over this file.\n"
+)
+for key, value in (("COMFY_DIR", comfy), ("COMFY_VENV", venv)):
+    line = f'{key}="${{{key}:-{value}}}"'
+    # Replace whatever is there, commented or not: setup.sh built these, so it
+    # knows the answer better than a default copied out of the template does.
+    pattern = re.compile(rf"^[ \t]*#?[ \t]*{key}=.*$", re.M)
+    text, n = pattern.subn(lambda _m, line=line: line, text, count=1)
+    if not n:
+        text = text.rstrip("\n") + "\n" + line + "\n"
+    print(f"  {key}={value}")
+path.write_text(text)
+print(f"recorded in {path}")
+PY
+
 echo
 echo "Done: $VENV"
 echo "Next: ./run_comfyui.sh   (or sbatch slurm/comfyui.sbatch on a GPU node)"

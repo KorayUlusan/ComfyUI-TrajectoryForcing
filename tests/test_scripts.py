@@ -14,6 +14,7 @@ a GPU.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -264,3 +265,108 @@ class TestThePinsAgree:
         # for the wrong reason -- the failure mode of every stale-expectation bug
         # in this repo so far.
         assert len(self.pins((EXT_ROOT / "env" / "setup.sh").read_text())) >= 10
+
+
+class TestTheLauncherPicksTheRightComfyUI:
+    """`run_comfyui.sh`'s symlink and workspace handling.
+
+    Both cases here are from one report. A user installed into a fresh
+    directory, launched it, and got:
+
+        ln: failed to create symbolic link '.../custom_nodes/...': File exists
+        srun: error: task 0: Exited with exit code 1
+
+    Two faults at once. The guard was `[[ ! -e "$LINK" ]]`, and `-e` follows the
+    link, so it is *false* for a dangling one -- the link left behind by an
+    install that had since been deleted. And COMFY_DIR had fallen back to its
+    $HOME default because the .env carried only TF_PARTITION and TF_QOS, so the
+    launcher of the new install was about to start an unrelated ComfyUI.
+
+    `run_comfyui_slurm.sh` stubs srun, so none of this is reachable through the
+    harness above: it runs on the compute node. These drive the script directly.
+    """
+
+    def workspace(self, tmp_path, name="comfyui-trajectoryforcing"):
+        """A ComfyUI with this extension inside its custom_nodes/."""
+        comfy = tmp_path / "ComfyUI"
+        (comfy / "custom_nodes").mkdir(parents=True)
+        (comfy / "main.py").write_text("")
+        ext = comfy / "custom_nodes" / name
+        ext.mkdir()
+        shutil.copy(EXT_ROOT / "run_comfyui.sh", ext / "run_comfyui.sh")
+
+        venv = tmp_path / "venv" / "bin"
+        venv.mkdir(parents=True)
+        python = venv / "python"
+        # Satisfies the CUDA probe, the device-name print, and the final exec.
+        python.write_text(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "-c" ]]; then echo stub; exit 0; fi\n'
+            'echo "STUB SERVER"\n'
+        )
+        python.chmod(0o755)
+        return comfy, ext, venv.parent
+
+    def launch(self, ext, comfy, venv, tmp_path):
+        return subprocess.run(
+            ["bash", str(ext / "run_comfyui.sh"), "8199"],
+            env={
+                **os.environ,
+                "COMFY_DIR": str(comfy),
+                "COMFY_VENV": str(venv),
+                "TF_ENV_FILE": str(tmp_path / "no-such.env"),
+                "TF_LOG_DIR": str(tmp_path / "logs"),
+            },
+            capture_output=True, text=True, timeout=120,
+        )
+
+    def test_a_dangling_link_is_replaced_rather_than_fatal(self, tmp_path):
+        """The reported crash. `-e` is false for a dangling link, so the old
+        guard fell through to `ln` and `set -e` killed the launch."""
+        comfy, ext, venv = self.workspace(tmp_path)
+        stale = comfy / "custom_nodes" / "other-copy"
+        stale.symlink_to(tmp_path / "deleted-install")
+        assert not stale.exists() and stale.is_symlink(), "not a dangling link"
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        shutil.copy(EXT_ROOT / "run_comfyui.sh", elsewhere / "run_comfyui.sh")
+        (comfy / "custom_nodes" / "elsewhere").symlink_to(tmp_path / "gone")
+
+        out = self.launch(elsewhere, comfy, venv, tmp_path)
+        assert out.returncode == 0, out.stderr
+        assert (comfy / "custom_nodes" / "elsewhere").resolve() == elsewhere.resolve()
+
+    def test_a_link_to_a_different_copy_stops_with_both_paths(self, tmp_path):
+        """Two copies register the same node names and which wins is undefined,
+        so this is worth refusing rather than guessing."""
+        comfy, _, venv = self.workspace(tmp_path)
+        mine = tmp_path / "mine"
+        mine.mkdir()
+        shutil.copy(EXT_ROOT / "run_comfyui.sh", mine / "run_comfyui.sh")
+        theirs = tmp_path / "theirs"
+        theirs.mkdir()
+        (comfy / "custom_nodes" / "mine").symlink_to(theirs)
+
+        out = self.launch(mine, comfy, venv, tmp_path)
+        assert out.returncode != 0
+        assert "another copy" in out.stderr
+        assert str(theirs) in out.stderr
+
+    def test_it_uses_the_comfyui_it_actually_lives_in(self, tmp_path):
+        """The silent half of the report: COMFY_DIR pointing somewhere else."""
+        comfy, ext, venv = self.workspace(tmp_path)
+        unrelated = tmp_path / "unrelated-ComfyUI"
+        (unrelated / "custom_nodes").mkdir(parents=True)
+        (unrelated / "main.py").write_text("")
+
+        out = self.launch(ext, unrelated, venv, tmp_path)
+        assert out.returncode == 0, out.stderr
+        assert str(comfy) in out.stdout
+        assert "not the configured" in out.stdout
+
+    def test_an_extension_already_in_place_needs_no_link(self, tmp_path):
+        comfy, ext, venv = self.workspace(tmp_path)
+        out = self.launch(ext, comfy, venv, tmp_path)
+        assert out.returncode == 0, out.stderr
+        assert "linked" not in out.stdout

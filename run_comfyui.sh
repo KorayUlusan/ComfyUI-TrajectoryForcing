@@ -75,9 +75,52 @@ export TF_REPO="${TF_REPO:-$(cd "$EXT_DIR/.." && pwd)/TrajectoryForcing}"
 export no_proxy="localhost,127.0.0.1"
 export NO_PROXY="$no_proxy"
 
+# --- am I about to start the ComfyUI this extension actually lives in? ------
+# If this copy sits in some ComfyUI's custom_nodes/, that is the ComfyUI it
+# belongs to, whatever $COMFY_DIR happens to default to. Getting this wrong is
+# silent and awful: the server starts, a *different* copy of the nodes loads,
+# and edits appear to do nothing. It happened -- a .env carrying only
+# TF_PARTITION and TF_QOS left COMFY_DIR on its $HOME default, and the launcher
+# of a freshly built install was one line away from running an unrelated one.
+PARENT="$(cd "$EXT_DIR/.." && pwd)"
+if [[ "$(basename "$PARENT")" == "custom_nodes" ]]; then
+  OWNER="$(cd "$PARENT/.." && pwd)"
+  if [[ -f "$OWNER/main.py" && "$OWNER" != "$COMFY_DIR" ]]; then
+    echo "NOTE: this extension lives in $OWNER, not the configured $COMFY_DIR."
+    echo "      Using $OWNER. Set COMFY_DIR in .env to silence this."
+    COMFY_DIR="$OWNER"
+  fi
+fi
+
+echo "ComfyUI:  $COMFY_DIR"
+echo "venv:     $VENV"
+
 # --- the custom_nodes symlink ----------------------------------------------
+# Only needed when the extension is somewhere else, which is the developer
+# layout: a git checkout linked in rather than copied.
 LINK="$COMFY_DIR/custom_nodes/$(basename "$EXT_DIR")"
-if [[ ! -e "$LINK" ]]; then
+if [[ "$LINK" == "$EXT_DIR" ]]; then
+  :                                    # already in place; nothing to link
+elif [[ -L "$LINK" ]]; then
+  # -e follows the link, so it is FALSE for a dangling one -- which is how this
+  # used to fail with "ln: File exists" and take the whole launch with it. A
+  # link left by an install that has since been deleted is exactly that case.
+  # -L true and -e false is exactly "dangling": the link is there, its target is
+  # not. `readlink -f` is no help telling them apart -- it resolves as far as it
+  # can and hands back a path for a target that does not exist.
+  if [[ ! -e "$LINK" ]]; then
+    echo "replacing a dangling link at $LINK (its target is gone)"
+    rm -f "$LINK"
+    ln -s "$EXT_DIR" "$LINK"
+  elif [[ "$(readlink -f "$LINK")" != "$EXT_DIR" ]]; then
+    TARGET="$(readlink -f "$LINK")"
+    echo "ERROR: $LINK already points at another copy of this extension:" >&2
+    echo "         $TARGET" >&2
+    echo "       Two copies register the same node names and which one wins is" >&2
+    echo "       undefined. Remove one, or run the launcher from the other." >&2
+    exit 1
+  fi
+elif [[ ! -e "$LINK" ]]; then
   ln -s "$EXT_DIR" "$LINK"
   echo "linked $LINK -> $EXT_DIR"
 fi
