@@ -24,6 +24,10 @@
 *.pth
 *.npz
 
+# The working record: design history, job ids, what each run found. Kept
+# locally and deliberately not published, so nothing in the repo may link to it.
+/PLAN.md
+
 # ComfyUI drops these into a custom-node directory at runtime.
 /web/extensions/**/dist/
 *.log

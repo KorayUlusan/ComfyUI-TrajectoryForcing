@@ -34,7 +34,7 @@ TF_REPO_URL = "https://github.com/mervekocabas/TrajectoryForcing.git"
 # re-runs the smoke tests -- not silently, on a stranger's first install.
 #
 # To update: bump the sha, run `./slurm/submit.sh slurm/gpu_smoke.sbatch`, and
-# record the job id in PLAN.md.
+# keep the job id with the result.
 TF_REPO_COMMIT = "2fab8a6acd08efa2532b0312ee03fb68f8ef8e7e"
 
 # Where an automatic fetch puts it. Inside the extension, so a Manager install is
