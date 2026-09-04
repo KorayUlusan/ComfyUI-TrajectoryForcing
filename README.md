@@ -378,6 +378,22 @@ that check the edit lands on the wrong region and nothing says so.
 
 ## Troubleshooting
 
+If anything about the install is in doubt, ask it directly:
+
+```bash
+python -m tf_nodes.doctor
+```
+
+It reports python, torch and its CUDA major, the GPU, the JAX stack, where
+TrajectoryForcing was found and whether it matches the pin, which weights exist,
+free disk, and any note the installer left — each with the one command that
+fixes it. Run it from the extension directory with the same interpreter ComfyUI
+uses, and paste the output into a bug report rather than a screenshot.
+
+It will not import JAX or download anything while answering. Add `--devices` to
+have JAX enumerate the GPUs, but not inside a running ComfyUI: that initialises
+the backend, which cannot be undone in the process.
+
 <details>
 <summary><b>An edit appears to do nothing</b></summary>
 

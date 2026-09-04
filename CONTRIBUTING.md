@@ -41,6 +41,8 @@ tf_nodes/
   locate.py             where TrajectoryForcing and the weights are
   tf_import.py          the namespace swap (read this before anything else)
   pipeline.py           the only module that touches JAX
+  health.py             startup problems, recorded rather than raised
+  doctor.py             `python -m tf_nodes.doctor`, the whole install in one report
   data.py               the three socket payloads
   tokens.py             region clustering + the edit primitive, pure numpy
   render.py             latents/regions/selections -> pictures
