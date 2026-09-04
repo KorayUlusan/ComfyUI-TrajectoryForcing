@@ -20,8 +20,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - run: pip install ruff
@@ -30,20 +30,20 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: ComfyUI-TrajectoryForcing
 
       # Shallow, and only for its Python packages: nothing here starts a
       # server. `tests/conftest.py` finds it at ../ComfyUI relative to the
       # extension, which is the layout checked out above.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: comfyanonymous/ComfyUI
           path: ComfyUI
           fetch-depth: 1
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip

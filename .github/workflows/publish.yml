@@ -42,7 +42,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Respects .comfyignore, so the archive excludes tests/, slurm/, scripts/
       # and .github/ while keeping the docs the listing renders.
