@@ -27,6 +27,19 @@ def _isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(health, "LAST_REPORT", None)
 
 
+def working_checkout(monkeypatch, tmp_path):
+    """A checkout that is simply there.
+
+    Stubbed rather than resolved for real: `health.collect()` is allowed to
+    fetch, because `on_load` is supposed to, and a unit suite that clones from
+    the network on a cold runner is slow, flaky, and -- as this file found out
+    -- leaves a checkout behind that later tests then trip over.
+    """
+    from tf_nodes import locate
+
+    monkeypatch.setattr(locate, "tf_repo", lambda *a, **k: tmp_path / "TrajectoryForcing")
+
+
 def break_checkout(monkeypatch, exc=None):
     """Make locating TrajectoryForcing fail the way a cold start can."""
     from tf_nodes import locate
@@ -75,7 +88,8 @@ class TestNothingOnTheStartupPathRaises:
         report = health.report_at_startup()
         assert health.LAST_REPORT is report
 
-    def test_a_healthy_install_reports_nothing(self, monkeypatch):
+    def test_a_healthy_install_reports_nothing(self, monkeypatch, tmp_path):
+        working_checkout(monkeypatch, tmp_path)
         monkeypatch.setattr(health, "missing_runtime_deps", lambda: [])
         report = health.collect()
         assert report.ok, [p.title for p in report.problems]
@@ -90,14 +104,19 @@ class TestTheProblemIsStillThereWhenTheUserRunsSomething:
         health.report_at_startup()
         assert health.blocking_problem() is not None
 
-    def test_missing_dependencies_block_a_node(self, monkeypatch):
+    def test_missing_dependencies_block_a_node(self, monkeypatch, tmp_path):
+        # The checkout is stubbed present so the dependency problem is the only
+        # one, and `blocking_problem` is therefore being asked about the thing
+        # this test names rather than about a missing checkout.
+        working_checkout(monkeypatch, tmp_path)
         monkeypatch.setattr(health, "missing_runtime_deps", lambda: ["jax", "flax"])
         health.report_at_startup()
         problem = health.blocking_problem()
         assert problem is not None
         assert "env/setup.sh" in problem.fix
 
-    def test_a_healthy_install_blocks_nothing(self, monkeypatch):
+    def test_a_healthy_install_blocks_nothing(self, monkeypatch, tmp_path):
+        working_checkout(monkeypatch, tmp_path)
         monkeypatch.setattr(health, "missing_runtime_deps", lambda: [])
         health.report_at_startup()
         assert health.blocking_problem() is None
@@ -112,9 +131,10 @@ class TestTheProblemIsStillThereWhenTheUserRunsSomething:
             pipeline.check_startup_problems()
         assert "Set TF_REPO to the directory" in str(excinfo.value)
 
-    def test_the_guard_is_silent_on_a_healthy_install(self, monkeypatch):
+    def test_the_guard_is_silent_on_a_healthy_install(self, monkeypatch, tmp_path):
         from tf_nodes import pipeline
 
+        working_checkout(monkeypatch, tmp_path)
         monkeypatch.setattr(health, "missing_runtime_deps", lambda: [])
         health.report_at_startup()
         pipeline.check_startup_problems()
@@ -129,7 +149,8 @@ class TestTheProblemIsStillThereWhenTheUserRunsSomething:
 class TestTheInstallerNoteOutlivesTheInstaller:
     """install.py runs in another process, under collapsed output, once."""
 
-    def test_a_note_is_read_back_as_a_problem(self):
+    def test_a_note_is_read_back_as_a_problem(self, monkeypatch, tmp_path):
+        working_checkout(monkeypatch, tmp_path)
         health.write_setup_marker("torch 2.14.0+cpu is a CPU build.")
         problem = next(
             (p for p in health.collect().problems if "installer left a note" in p.title), None
@@ -137,7 +158,8 @@ class TestTheInstallerNoteOutlivesTheInstaller:
         assert problem is not None
         assert "CPU build" in problem.detail
 
-    def test_clearing_it_removes_the_problem(self):
+    def test_clearing_it_removes_the_problem(self, monkeypatch, tmp_path):
+        working_checkout(monkeypatch, tmp_path)
         health.write_setup_marker("something")
         health.clear_setup_marker()
         assert not any("installer left a note" in p.title for p in health.collect().problems)
@@ -152,9 +174,10 @@ class TestTheInstallerNoteOutlivesTheInstaller:
         monkeypatch.setattr(health, "SETUP_MARKER", tmp_path / "nope" / "deep" / "marker.txt")
         assert health.write_setup_marker("text") is None
 
-    def test_a_note_alone_does_not_block_a_node(self, monkeypatch):
+    def test_a_note_alone_does_not_block_a_node(self, monkeypatch, tmp_path):
         """The user may have fixed it by hand and not deleted the file. Nagging
         in the log is fair; refusing to run is not."""
+        working_checkout(monkeypatch, tmp_path)
         monkeypatch.setattr(health, "missing_runtime_deps", lambda: [])
         health.write_setup_marker("stale advice")
         health.report_at_startup()
@@ -231,6 +254,7 @@ class TestASecondCopyIsNoticed:
         Refusing to run would be a worse outcome than the ambiguity."""
         root = self._fake_tree(tmp_path, "comfyui-trajectoryforcing")
         monkeypatch.setattr(health, "EXT_ROOT", root)
+        working_checkout(monkeypatch, tmp_path)
         monkeypatch.setattr(health, "missing_runtime_deps", lambda: [])
         health.report_at_startup()
         assert health.blocking_problem() is None

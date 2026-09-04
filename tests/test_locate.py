@@ -49,12 +49,29 @@ class TestAnExistingCheckoutWins:
         assert locate.tf_repo() == tmp_path / "TrajectoryForcing"
 
     def test_opting_out_reports_where_it_looked(self, tmp_path, monkeypatch):
+        # TF_REPO_FETCH_DIR is a module constant built from the real EXT_ROOT at
+        # import, and `_candidates()` reads it directly -- so patching EXT_ROOT
+        # alone leaves the "inside the extension" candidate pointing at the
+        # actual extension directory. That was invisible until something in the
+        # same run fetched a checkout into it, and then this stopped raising.
         monkeypatch.delenv("TF_REPO", raising=False)
         monkeypatch.setattr(locate, "EXT_ROOT", tmp_path / "ext")
+        monkeypatch.setattr(locate, "TF_REPO_FETCH_DIR", tmp_path / "ext" / "TrajectoryForcing")
         monkeypatch.setenv("TF_NO_AUTO_FETCH", "1")
         monkeypatch.setattr(locate, "fetch_tf_repo", _never_called)
         with pytest.raises(FileNotFoundError, match="TF_NO_AUTO_FETCH"):
             locate.tf_repo()
+
+    def test_declining_to_fetch_for_one_call_reports_that_instead(self, tmp_path, monkeypatch):
+        """`allow_fetch=False` is the other way to reach the same branch, and it
+        should say which of the two applied."""
+        monkeypatch.delenv("TF_REPO", raising=False)
+        monkeypatch.delenv("TF_NO_AUTO_FETCH", raising=False)
+        monkeypatch.setattr(locate, "EXT_ROOT", tmp_path / "ext")
+        monkeypatch.setattr(locate, "TF_REPO_FETCH_DIR", tmp_path / "ext" / "TrajectoryForcing")
+        monkeypatch.setattr(locate, "fetch_tf_repo", _never_called)
+        with pytest.raises(FileNotFoundError, match="not permitted"):
+            locate.tf_repo(allow_fetch=False)
 
 
 class TestTheFetchIsPinned:
