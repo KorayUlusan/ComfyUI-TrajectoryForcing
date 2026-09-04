@@ -12,11 +12,15 @@ this writing (see `_latex/kickoff-slides/TF-diag.tex`, Chapter 2 TL;DR) — a
 TF-2.0 produces a checkpoint. Trajectory Dreamer (3D) is Phase 2 and not touched
 here at all.
 
-## Status — 2026-09-03
+## Status — 2026-09-04
 
 Steps 1–5 of the original build order are done and verified on an H100; the
-open questions below are all answered. What has *not* happened is a session of
-someone using it for a real edit, which is the next thing.
+open questions below are all answered. Five browser sessions have driven it, and
+each is written up below — every one produced defects that reading the code had
+not. What has *not* happened is an edit made for a **research** reason rather
+than to exercise the tool: chosen because the answer matters, run end to end,
+swept, and written into a results table. That is the next thing, and everything
+in `Next` stays a guess until it happens.
 
 | build step | state |
 |---|---|
@@ -31,18 +35,21 @@ Verification, all reproducible from this repo:
 - `pytest tests` — 352 tests, no GPU, ~5 s. Edit math, payloads, drawing, and
   every node's schema and `execute` against a stub pipeline.
 - `slurm/gpu_smoke.sbatch` — the nodes against the real TF-L model. **8/8,
-  job 449980**, including two controls: same class + seed reproduces the
+  job 449988**, including two controls: same class + seed reproduces the
   trajectory bit-for-bit, and the sweep's arm 0 reproduces the explicit
-  edit-and-resume chain bit-for-bit. Load 16.4 s warm, generate 0.1 s, resume
-  2.3 s, a three-seed sweep 0.7 s. (Superseded 7/7 on job 449604, which predates
+  edit-and-resume chain bit-for-bit. Load 14.4 s warm, generate 0.0 s, decode
+  0.2 s, resume 2.1 s, a three-seed sweep 0.8 s. (Superseded: 8/8 on job 449980,
+  which predates the nine-output cut; 7/7 on job 449604, which predates
   `TF Compare Levels` and `TF Sweep Edit`.)
 - `slurm/server_smoke.sbatch` — the workflows through a real ComfyUI server.
-  **13/13, job 449981**, 20 nodes registered, all five workflows
+  **13/13, job 449990**, 20 nodes registered, all five workflows
   executed. This is the only check that a node running several re-samples in one
   `execute` survives ComfyUI's execution engine rather than a direct call, and
   that the sweep's table reaches the client rather than only its images.
-  (Superseded 9/9 on job 449655, which predates workflow 05.) The first attempt
-  (449598) was 2/6 and is
+  (Superseded: 13/13 on job 449981, which predates the nine-output cut; 9/9 on
+  job 449655, which predates workflow 05. Job 449989, between them, is the 12/13
+  that found the script's own hardcoded output list — see the section on the nine
+  outputs.) The first attempt (449598) was 2/6 and is
   what found both the namespace bug below and a workflow naming an ImageNet
   class string one word off. The criteria covering the painter
   workflow's quiet stop were added after the first browser session and took five
@@ -283,6 +290,10 @@ visible as a number.
 Not done, and still the biggest gap: **a sweep node**. Running the same edit
 across seeds or across l* is the thing a graph should make cheap and the Gradio
 app cannot, and it still means duplicating the graph by hand.
+
+**Superseded the same day** by "The sweep node" below: `TF Sweep Edit` and
+workflow 05. The paragraph is kept because the gap it names is what the sweep's
+design answers, and the three forks recorded there only make sense against it.
 
 ## Third browser session (2026-09-03)
 
@@ -718,6 +729,63 @@ link to `(regions, 3)` fails `test_no_link_counts_to_a_slot` and raises
 352 tests, ruff clean. No GPU job was needed -- the generator runs on the login
 node under `--cpu`, and nothing about node behaviour changed.
 
+## The pictures are archived too (2026-09-04)
+
+`Next` item 3 asked for the decoded intermediates to be saved beside the `.npz`.
+**New: `TF Save Images`**, writing to `output/trajectory_forcing/<name>.png` under the same
+`name` widget the other two save nodes use, so one run's `.npz`, `.md` and
+`.png`s share a stem instead of landing under three unrelated names.
+
+**The item's own framing was half wrong, and the correction is the useful part.**
+It said a run that has to be cited "also wants the images that were looked at",
+which treats every workflow alike. They are not alike:
+
+- **A single trajectory** — the images are *re-derivable*. The `.npz` carries the
+  latents, so `TF Load Levels` → `TF Decode` reproduces the frames exactly. It
+  costs a GPU allocation and a model load; nothing is lost.
+- **A sweep** — the frames are *not recoverable at all*. Only `output_arm`'s
+  trajectory leaves the node on the `levels` socket; every other arm's latents
+  are discarded when `execute` returns. Those arms exist as pixels in the contact
+  sheet and nowhere else, and the sheet went to `PreviewImage`, which writes to
+  ComfyUI's **temp** directory. Re-running with the same seeds would rebuild
+  them, but that is redoing the experiment rather than reading its record.
+
+So the item was right that this was more pressing once the sweep existed, and
+wrong about why: not because a sheet is "worth keeping" but because it is the
+only artefact here that a cache clear destroys outright. Workflow 05 is the one
+that got the node wired in.
+
+**Core's `SaveImage` was the alternative and was not dismissed lightly** — the
+Painter pivot is this repo's own precedent for using what core ships rather than
+rebuilding it. It writes PNGs perfectly well. What it cannot do is tie the files
+to the run: `ComfyUI_00001_.png` in the output root, while the trajectory and the
+table sit elsewhere under their own names. The shared stem is the whole feature,
+and the class/seed/history stamped into each PNG's own metadata is what makes a
+picture in a writeup traceable back to the run that made it.
+
+Two smaller things came with it. The empty-batch case is a `ValueError` naming
+the shape rather than an `IndexError` from PIL, because a degenerate result is a
+result and this repo has already lost a run to one reaching a library that
+raises. And not wiring the trajectory in is reported in the node's own body
+("no class/seed metadata"), since silently writing untraceable files is the exact
+failure the node exists to prevent.
+
+**`server_smoke` gained criterion 6**, written into its docstring before the run:
+05 leaves both its table and its sheet on disk under one name, and the PNG
+carries the class and seed that produced it. The directory is cleared before the
+workflows run — `TF Save Report` appends and `TF Save Images` side-steps a
+collision with `-001`, so both are designed *not* to overwrite, which means a
+file from an earlier run would have satisfied the criterion while this run wrote
+nothing. A criterion an absent result can pass has reported PASS here before.
+
+**And a sixth staleness vector in that script, closed before it bit.**
+`EXPECTED_NODES` is a hardcoded set and the check computes `EXPECTED_NODES -
+published`, so a node added to the extension and forgotten there does not fail —
+it silently stops being covered. That is the hardcoded-output-list bug of job
+449989 in a quieter form: under-checking never turns red at all.
+`test_server_smoke_expects_exactly_the_nodes_that_exist` now pins the set equal
+to the registered node ids, in the unit suite.
+
 ## Next
 
 Ordered by what would change the design, not by size.
@@ -731,10 +799,9 @@ Ordered by what would change the design, not by size.
    The sweep can now answer this rather than it staying a guess: `cosine_threshold`
    is not an axis, but running one edit at four thresholds by hand is four runs
    of workflow 05, and the spread numbers are comparable across them.
-3. **Save the decoded intermediates alongside the `.npz`.** `TF Save Levels`
-   stores latents and history; a run that has to be cited later also wants the
-   images that were looked at. More pressing now that a sweep produces a sheet
-   worth keeping.
+3. ~~**Save the decoded intermediates alongside the `.npz`.**~~ Done — see "The
+   pictures are archived too" below. The item's framing was half wrong, which is
+   recorded there.
 4. **A second sweep axis.** A 4×4 grid (seed × l\*) is what an actual results
    table wants, and the repo's own experiment notes are emphatic that a
    four-seed cell has already overstated a gap here badly enough to need a

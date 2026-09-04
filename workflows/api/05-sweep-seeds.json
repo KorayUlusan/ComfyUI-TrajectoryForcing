@@ -194,5 +194,23 @@
     "_meta": {
       "title": "keep the table \u2014 output/trajectory_forcing/"
     }
+  },
+  "14": {
+    "class_type": "TFSaveImages",
+    "inputs": {
+      "images": [
+        "9",
+        1
+      ],
+      "name": "sweep",
+      "levels": [
+        "9",
+        2
+      ],
+      "overwrite": false
+    },
+    "_meta": {
+      "title": "keep the sheet \u2014 same name as the table"
+    }
   }
 }

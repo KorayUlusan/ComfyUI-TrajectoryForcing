@@ -30,7 +30,14 @@ Exit criteria, fixed before the run:
   5. sweep     -- 05's report names every arm it was asked for and reports a
                   spread, so the table reached the client rather than only the
                   images. A sweep that silently ran one arm would pass 2.
-  6. blocked   -- 03 (the Painter one) stops at TF Tokens From Mask with no
+  6. archived  -- 05 leaves its table *and* its contact sheet on disk under one
+                  name, and the PNG carries the class and seed that produced it.
+                  A sweep's non-output arms exist in that sheet and nowhere
+                  else -- PreviewImage writes to temp -- so a run whose sheet is
+                  not archived cannot be cited later. The directory is cleared
+                  before the run, or a file left by an earlier one would satisfy
+                  this criterion without anything having been written.
+  7. blocked   -- 03 (the Painter one) stops at TF Tokens From Mask with no
                   error dialog at all, on *two* consecutive runs -- the bug this
                   replaced raised on the first run and went silent on the
                   second, so one run cannot tell the two apart. It must still
@@ -65,6 +72,9 @@ def comfy_root() -> Path:
 
 COMFY = comfy_root()
 OUT = EXT_ROOT / "outputs" / "server_smoke"
+# Where TF Save Levels / Report / Images write, i.e. ComfyUI's own output
+# directory -- the server is started with `cwd=COMFY` and no --output-directory.
+SAVED = COMFY / "output" / "trajectory_forcing"
 STARTUP_TIMEOUT = 900     # a cold TF Load Pipeline compiles XLA on first use
 EXECUTE_TIMEOUT = 900
 
@@ -72,7 +82,7 @@ EXPECTED_NODES = {
     "TFLoadPipeline", "TFImageNetClass", "TFGenerate", "TFDecode", "TFLatentPreview",
     "TFLevelsInfo", "TFLevelCanvas", "TFRegionMap", "TFTokensFromMask",
     "TFTokensFromCoords", "TFTokensCombine", "TFTokensPreview", "TFFeatureEdit",
-    "TFShapeEdit", "TFResumeFromLevel", "TFSaveLevels", "TFLoadLevels",
+    "TFShapeEdit", "TFResumeFromLevel", "TFSaveLevels", "TFSaveImages", "TFLoadLevels",
     "TFCompareLevels", "TFSweep", "TFSaveReport",
 }
 
@@ -245,6 +255,14 @@ def main() -> int:
         )
 
         # --- 2 & 3. execute --------------------------------------------------
+        # Clear what workflow 05 archives before running it. TF Save Report
+        # appends and TF Save Images side-steps a collision with a -001 suffix,
+        # so both are designed *not* to overwrite -- which means a file from an
+        # earlier run would satisfy criterion 6 while this run wrote nothing.
+        # A criterion an absent result can pass has reported PASS in this repo
+        # before.
+        for stale in SAVED.glob("sweep*") if SAVED.is_dir() else ():
+            stale.unlink()
         entries = {}
         for name in ("01-generate-and-decode", "02-feature-edit-coords", "04-shape-edit",
                      "05-sweep-seeds"):
@@ -301,7 +319,28 @@ def main() -> int:
             if "spread across arms" in sweep_said else f"no table in {sweep_said[:400]}",
         )
 
-        # --- 5. the painter workflow's first two runs ------------------------
+        # --- 5. the sweep's table and sheet reach disk ------------------------
+        # SAVED is cleared before any workflow runs (see below), so anything here
+        # was written by this run. Reading the PNG's own metadata is the point:
+        # it is what makes a picture in a writeup traceable, and a unit test with
+        # a stub cannot show it survives the real execution path.
+        sheet = SAVED / "sweep.png"
+        table = SAVED / "sweep.md"
+        stamped = ""
+        if sheet.is_file():
+            from PIL import Image
+
+            with Image.open(sheet) as handle:
+                text = handle.text
+            stamped = f"class {text.get('tf_class', '?')}, seed {text.get('tf_seed', '?')}"
+        check(
+            "the sweep's numbers and picture are archived together",
+            sheet.is_file() and table.is_file() and "213" in stamped and "592" in stamped,
+            f"{sheet.name} + {table.name} in {SAVED} ({stamped})" if sheet.is_file()
+            else f"no sweep.png in {SAVED}; found {sorted(p.name for p in SAVED.glob('*'))}",
+        )
+
+        # --- 6. the painter workflow's first two runs ------------------------
         # Run it twice. The bug this replaced showed an error dialog on the
         # first run and nothing on the second, because the second found the node
         # cached -- so a single run cannot tell whether it is fixed.

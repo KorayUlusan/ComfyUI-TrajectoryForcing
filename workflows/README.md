@@ -257,6 +257,14 @@ the class, seed and full edit history above it. Successive runs accumulate in
 the one file, so a session's sweeps end up side by side and comparable. A number
 you cannot trace back to the run that made it is worth much less than it looks.
 
+**The sheet is saved too, and that one matters more.** *TF Save Images* writes
+it to `output/trajectory_forcing/sweep.png` under the same name, so the table
+and the picture from one run sit together. The preview above it goes to
+ComfyUI's *temp* directory, which gets cleared — and unlike the table, the sheet
+cannot be rebuilt: only the arm named by `output_arm` leaves the sweep as a
+trajectory, so every other arm exists in that image or nowhere. Each PNG carries
+the class, seed and edit history in its own metadata.
+
 **Cost:** two re-samples and one decode per arm. Four arms is a few seconds once
 the model is warm; forty is a coffee. Turn `decode` off (advanced) and the
 contact sheet uses PCA tiles instead, which costs nothing — the table is
@@ -291,6 +299,7 @@ Useful pieces not wired into any of the five:
 | **TF Tokens Combine** | union/intersect/subtract several selections into one region |
 | **TF Save / Load Levels** | keep a trajectory across restarts, so two edits can be compared against the identical starting image |
 | **TF Save Report** | write a sweep or compare table to `output/trajectory_forcing/*.md` with the run that produced it — wired into workflow 05 |
+| **TF Save Images** | write the pictures to `output/trajectory_forcing/*.png` under the same name, with the run stamped into the PNG metadata — wired into workflow 05 |
 | **TF Levels Info** | the class, seed and full edit history of a trajectory |
 | **TF Level Canvas** → `view: decoded RGB` | paint against the picture instead of the false-colour tokens |
 

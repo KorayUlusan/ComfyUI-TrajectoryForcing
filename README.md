@@ -218,6 +218,7 @@ what propagates it.
 | **TF Sweep Edit** | The whole chain above, run once per value of **one** axis — a seed list, the levels, or a strength ramp — with everything else pinned. See below. |
 | **TF Save / Load Levels** | A trajectory to and from `output/trajectory_forcing/*.npz`, with its class, seed and edit history. A trajectory costs GPU time and is what every edit is measured against; reloading the exact one an earlier run used is what makes two edits comparable. |
 | **TF Save Report** | A sweep or comparison table to `output/trajectory_forcing/<name>.md`, fenced so the columns survive, and stamped with the class, seed and edit history that produced it when a trajectory is wired in. Appends by default, so a session's runs accumulate into one file. Without it the numbers exist only as text in a node body. |
+| **TF Save Images** | Pictures to `output/trajectory_forcing/<name>.png`, beside the `.npz` and the `.md` from the same run, with the class, seed and edit history stamped into each PNG's metadata. Every workflow otherwise ends in `PreviewImage`, which writes to ComfyUI's *temp* directory. For one trajectory that is recoverable — the `.npz` has the latents, so decoding rebuilds the frames — but a sweep's non-output arms exist in the contact sheet and nowhere else. |
 
 ### Sweeping
 
@@ -245,7 +246,9 @@ first, then one frame per arm, stitched into **one** image so the arms can be
 compared at full size (a row up to six of them, a near-square grid beyond). Set
 `sheet_layout` to *separate frames* for the batch instead, which is what
 `SaveImage` needs to write one file per arm. `levels` hands one arm on for
-saving or comparing, and *TF Save Report* keeps the table. Cost is two re-samples and one decode per arm, and `arm_limit`
+saving or comparing, *TF Save Report* keeps the table and *TF Save Images* keeps
+the sheet — the sheet being the half that cannot be recomputed, since only the
+arm named by `output_arm` leaves the node as a trajectory. Cost is two re-samples and one decode per arm, and `arm_limit`
 (advanced) refuses to start rather than let a mistyped `0-1000` hold the GPU.
 
 Sweeping *l\** is the one axis that cannot hold everything else fixed: a

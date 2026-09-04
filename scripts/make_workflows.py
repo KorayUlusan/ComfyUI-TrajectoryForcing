@@ -847,6 +847,13 @@ The contact sheet is the no-edit baseline first, then one frame per arm.
 - *output_arm* (advanced) picks which arm leaves on the `levels` output, for
   saving or comparing. Everything else about that arm is in the report.
 
+Group 5 writes both the table and the sheet to `output/trajectory_forcing/`
+under the same *name*, so `sweep.md` and `sweep.png` belong to the same run.
+Saving the picture matters more than it looks: only the arm named by
+*output_arm* leaves this node as a trajectory, so every other arm exists in that
+sheet and nowhere else — and the preview above it goes to a temp folder that
+gets cleared.
+
 Whatever is not on the axis is **pinned** to its own widget, so no two arms
 ever differ in two ways at once.
 """,
@@ -896,7 +903,13 @@ ever differ in two ways at once.
     # cannot be cited later. Appends, so a session's runs accumulate in one file.
     keep = g.add("TFSaveReport", 4, 20, title="keep the table — output/trajectory_forcing/",
                  text=(sweep, "report"), levels=(sweep, "levels"), name="sweep", append=True)
-    g.group("5 · Keep the numbers", [keep], colour="#3f789e")
+    # And the sheet, for the same reason but a stronger one: the table can be
+    # recomputed from the latents, and the sheet cannot. Only `output_arm`'s
+    # trajectory leaves the sweep, so every other arm's frames exist here or
+    # nowhere -- and PreviewImage above writes to temp, not output.
+    keep_sheet = g.add("TFSaveImages", 4, 26, title="keep the sheet — same name as the table",
+                       images=(sweep, "sheet"), levels=(sweep, "levels"), name="sweep")
+    g.group("5 · Keep the numbers and the picture", [keep, keep_sheet], colour="#3f789e")
     return g
 
 

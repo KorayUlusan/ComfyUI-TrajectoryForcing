@@ -167,6 +167,124 @@ class TFSaveReport(io.ComfyNode):
         return io.NodeOutput(str(path), ui=node_preview(text=note))
 
 
+class TFSaveImages(io.ComfyNode):
+    """The pictures, next to the latents and the numbers.
+
+    `TF Save Levels` archives latents and `TF Save Report` archives the table;
+    what a run that has to be cited later still lost was the images someone
+    actually looked at. Every workflow here ends in `PreviewImage`, which writes
+    to ComfyUI's **temp** directory -- so the pictures are one cache-clear from
+    gone.
+
+    For a single trajectory that is an inconvenience: the `.npz` has the latents,
+    so `TF Load Levels` -> `TF Decode` reproduces the frames exactly, at the cost
+    of a GPU and a model load. For a **sweep** it is a real loss. Only
+    `output_arm`'s trajectory leaves the node on the `levels` socket; every other
+    arm's latents are discarded when `execute` returns, so those frames exist
+    nowhere but the contact sheet. Re-running with the same seeds would rebuild
+    them, but that is redoing the experiment rather than reading its record.
+
+    Core's `SaveImage` writes PNGs perfectly well and is not being replaced for
+    the sake of it. What it cannot do is tie the files to the run: it names them
+    `ComfyUI_00001_.png` in the output root, so a trajectory, its table and its
+    pictures land under three unrelated names. This shares the `name` widget with
+    the other two save nodes, writes beside them in output/{SUBDIR}/, and stamps
+    the class, seed and edit history into each PNG's own metadata -- which is
+    what makes a picture in a writeup traceable back to the run that made it.
+    """
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="TFSaveImages",
+            search_aliases=["save", "png", "image", "sheet", "export", "archive", "keep"],
+            has_intermediate_output=True,
+            display_name="TF Save Images",
+            category=CATEGORY_IO,
+            is_output_node=True,
+            description=(
+                f"Write images to output/{SUBDIR}/<name>.png, beside the trajectory and the "
+                "report from the same run.\n\n"
+                "PreviewImage writes to ComfyUI's temp directory, so what you looked at does "
+                "not survive a cache clear. A sweep's contact sheet is the pressing case: only "
+                "one arm's latents leave the node, so the other arms exist nowhere else.\n\n"
+                "Wire the trajectory in too and each PNG carries the class, seed and edit "
+                "history in its metadata."
+            ),
+            inputs=[
+                io.Image.Input(
+                    "images",
+                    tooltip="Any IMAGE. A batch is written as one file per frame; a stitched "
+                            "contact sheet is one file.",
+                ),
+                io.String.Input("name", default="images"),
+                TFLevelsSocket.Input(
+                    "levels", optional=True,
+                    tooltip="Optional provenance: class, seed and edit history are written into "
+                            "each PNG's metadata so a picture can be traced back to its run.",
+                ),
+                io.Boolean.Input(
+                    "overwrite", default=False, advanced=True,
+                    tooltip="Off appends -001, -002, ... rather than replacing existing files.",
+                ),
+            ],
+            outputs=[io.String.Output("path")],
+        )
+
+    @classmethod
+    def execute(cls, images, name, levels=None, overwrite=False) -> io.NodeOutput:
+        from PIL import Image, PngImagePlugin
+
+        # Tensor or array, the way render.from_mask takes either: this module
+        # otherwise never imports torch and there is no reason to start.
+        arr = images.detach().cpu().numpy() if hasattr(images, "detach") else np.asarray(images)
+        frames = np.round(np.clip(np.asarray(arr, dtype=np.float32), 0.0, 1.0) * 255.0)
+        frames = frames.astype(np.uint8)
+        if frames.ndim == 3:  # a bare HWC image rather than a batch
+            frames = frames[None]
+        # A guard rather than an IndexError three lines down: an empty batch is a
+        # degenerate result worth reporting, and this repo has already paid for
+        # letting one reach a library that raises instead.
+        if frames.ndim != 4 or frames.shape[0] == 0:
+            raise ValueError(
+                f"Expected an IMAGE batch of shape [B,H,W,C] with at least one frame, "
+                f"got {tuple(np.shape(images))}."
+            )
+
+        stem = "".join(c for c in name.strip() if c.isalnum() or c in "-_.") or "images"
+        count = int(frames.shape[0])
+
+        def names(base: str) -> list[str]:
+            # One frame keeps the bare stem, so the common case is `sweep.png`
+            # rather than `sweep-01.png` and matches `sweep.npz` / `sweep.md`.
+            return ([f"{base}.png"] if count == 1
+                    else [f"{base}-{i + 1:02d}.png" for i in range(count)])
+
+        chosen, n = stem, 1
+        while not overwrite and any((_output_dir() / f).exists() for f in names(chosen)):
+            chosen, n = f"{stem}-{n:03d}", n + 1
+
+        meta = PngImagePlugin.PngInfo()
+        if levels is not None:
+            named = imagenet_classes().get(int(levels.class_id), "")
+            meta.add_text("tf_class", f"{levels.class_id}" + (f" ({named})" if named else ""))
+            meta.add_text("tf_seed", str(levels.seed))
+            meta.add_text("tf_history", " | ".join(levels.history))
+
+        written = []
+        for frame, filename in zip(frames, names(chosen), strict=True):
+            path = _output_dir() / filename
+            Image.fromarray(frame[:, :, :3] if frame.shape[-1] >= 3 else frame[:, :, 0]).save(
+                path, pnginfo=meta)
+            written.append(path)
+
+        note = f"wrote {len(written)} image{'s' if len(written) != 1 else ''} to {_output_dir()}"
+        note += "\n" + "\n".join(p.name for p in written)
+        if levels is None:
+            note += "\n(no trajectory wired -- the files carry no class/seed metadata)"
+        return io.NodeOutput(str(written[0]), ui=node_preview(text=note))
+
+
 class TFLoadLevels(io.ComfyNode):
     @classmethod
     def define_schema(cls):

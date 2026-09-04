@@ -618,6 +618,69 @@ class TestSaveLoad:
             node(node_classes, "TFLoadLevels").execute(file="nope.npz", path_override="")
 
 
+class TestTheImagesSurviveTheSession:
+    """`TF Save Images` -- the pictures, beside the latents and the numbers.
+
+    Every workflow ends in `PreviewImage`, which writes to ComfyUI's *temp*
+    directory. For a single trajectory losing that is recoverable: the `.npz`
+    has the latents and decoding reproduces the frames. For a sweep it is not --
+    only `output_arm`'s trajectory leaves the node, so the other arms exist
+    nowhere but the contact sheet.
+    """
+
+    def sheet(self, frames=3, size=8):
+        return torch.rand(frames, size, size, 3)
+
+    def save(self, node_classes, tmp_path, monkeypatch, **kwargs):
+        import tf_nodes.nodes_io as nodes_io
+
+        monkeypatch.setattr(nodes_io, "_output_dir", lambda: tmp_path)
+        return node(node_classes, "TFSaveImages").execute(**kwargs)
+
+    def test_a_batch_is_one_file_per_frame(self, node_classes, tmp_path, monkeypatch):
+        self.save(node_classes, tmp_path, monkeypatch, images=self.sheet(3), name="sweep")
+        assert sorted(p.name for p in tmp_path.glob("*.png")) == [
+            "sweep-01.png", "sweep-02.png", "sweep-03.png"]
+
+    def test_a_single_frame_keeps_the_bare_stem(self, node_classes, tmp_path, monkeypatch):
+        # So a stitched contact sheet lands as `sweep.png`, matching the
+        # `sweep.npz` and `sweep.md` the other two save nodes write.
+        out, = self.save(node_classes, tmp_path, monkeypatch, images=self.sheet(1), name="sweep")
+        assert out.endswith("sweep.png")
+        assert [p.name for p in tmp_path.glob("*.png")] == ["sweep.png"]
+
+    def test_the_run_is_traceable_from_the_file_alone(self, node_classes, levels, tmp_path,
+                                                     monkeypatch):
+        from PIL import Image
+
+        edited = levels.with_level(1, levels.level(1), "feature edit at level 1")
+        self.save(node_classes, tmp_path, monkeypatch,
+                  images=self.sheet(1), name="s", levels=edited)
+        text = Image.open(tmp_path / "s.png").text
+        assert text["tf_seed"] == str(edited.seed)
+        assert str(edited.class_id) in text["tf_class"]
+        assert "feature edit at level 1" in text["tf_history"]
+
+    def test_without_a_trajectory_it_says_the_metadata_is_missing(self, node_classes, tmp_path,
+                                                                  monkeypatch):
+        # Silently writing untraceable files is the failure this node exists to
+        # stop, so not wiring the trajectory has to be visible in the body.
+        out = self.save(node_classes, tmp_path, monkeypatch, images=self.sheet(1), name="s")
+        assert "no class/seed metadata" in ui_text(out)
+
+    def test_no_overwrite_appends_a_suffix(self, node_classes, tmp_path, monkeypatch):
+        for _ in range(2):
+            self.save(node_classes, tmp_path, monkeypatch, images=self.sheet(2), name="t")
+        assert sorted(p.name for p in tmp_path.glob("*.png")) == [
+            "t-001-01.png", "t-001-02.png", "t-01.png", "t-02.png"]
+
+    def test_an_empty_batch_is_reported_not_crashed(self, node_classes, tmp_path, monkeypatch):
+        # A degenerate result is a result. Letting it reach PIL loses the run.
+        with pytest.raises(ValueError, match="at least one frame"):
+            self.save(node_classes, tmp_path, monkeypatch,
+                      images=torch.zeros(0, 8, 8, 3), name="empty")
+
+
 class TestPipelineTravelsWithTheTrajectory:
     """TF_LEVELS carries the pipeline that made it, so consumers need no wire.
 
@@ -1523,6 +1586,30 @@ class TestTheSmokeScriptsCallNodesCorrectly:
                 f"gpu_smoke.py is missing {sorted(required - passed)} for {name}")
             checked += 1
         assert checked >= 6, f"only matched {checked} call sites; the parser has drifted"
+
+    def test_server_smoke_expects_exactly_the_nodes_that_exist(self, node_classes):
+        """The fifth way that script has gone stale, closed before it happened.
+
+        `EXPECTED_NODES` is a hardcoded set and the check subtracts it from what
+        the server published, so a node added to the extension and forgotten here
+        does not fail -- it silently stops being covered. That is the same shape
+        as the hardcoded output list that made job 449989 come back 12/13, except
+        quieter: under-checking never turns red at all.
+        """
+        import ast
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parent.parent / "scripts" / "server_smoke.py").read_text()
+        expected = next(
+            ast.literal_eval(statement.value)
+            for statement in ast.parse(source).body
+            if isinstance(statement, ast.Assign)
+            and getattr(statement.targets[0], "id", "") == "EXPECTED_NODES"
+        )
+        registered = {c.define_schema().node_id for c in node_classes}
+        assert expected == registered, (
+            f"server_smoke.py's EXPECTED_NODES is out of step: "
+            f"missing {sorted(registered - expected)}, stale {sorted(expected - registered)}")
 
 
 class TestTheWorkflowGeneratorNamesTheOutputsItWires:

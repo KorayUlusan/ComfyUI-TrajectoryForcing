@@ -1,8 +1,8 @@
 {
   "id": "trajectory-forcing-05-sweep-seeds",
   "revision": 0,
-  "last_node_id": 13,
-  "last_link_id": 18,
+  "last_node_id": 14,
+  "last_link_id": 20,
   "nodes": [
     {
       "id": 1,
@@ -22,7 +22,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "# 5. The same edit, four times over\n\n**Press Run \u2014 this one works as-is.** It takes about four times as long as\nworkflow 2, because it is doing the edit four times.\n\nWorkflow 2 makes one edit and shows you the result. The question that follows\nis always *\"was that the edit, or was that the seed?\"* \u2014 re-sampling levels 3\nfrom an edited canvas is still sampling, and it lands somewhere different every\ntime. One picture cannot tell you which part you are looking at.\n\n*TF Sweep Edit* answers it. It runs the identical edit once per **seed**, and\nfor each one it also re-samples the *unedited* canvas with that same seed. Each\nrow of the table is then the edit's effect with the seed held fixed and\ncancelled out.\n\nRead the table in the node's own body:\n\n- **tokens changed** \u2014 how many of the 256 tokens the edit moved, at the final\n  level, against that arm's own no-edit baseline.\n- **spread across arms** \u2014 the one number worth having. Near zero means every\n  seed landed in the same place, so the *edit* decides the outcome. Large means\n  the seed does, and a single-seed result from workflow 2 was not telling you\n  much.\n\nThe contact sheet is the no-edit baseline first, then one frame per arm.\n\n**Try:**\n- *values*: `592,593,594,595` \u2014 any list, or `1-8` for a range. `arm_limit`\n  (advanced) is there so a mistyped range cannot hold the GPU for an hour.\n- *axis* \u2192 **`level (l*)`** with *values* `0-3`: the same edit applied at each\n  level in turn. This is the sweep the paper's Sec. 4.4 is really about \u2014\n  coarser edits cascade through more re-sampling, and the table shows it.\n- *axis* \u2192 **`strength`** with *values* `0.25,0.5,0.75,1.0`: where a blend stops\n  being a blend and starts being a replacement.\n- *output_arm* (advanced) picks which arm leaves on the `levels` output, for\n  saving or comparing. Everything else about that arm is in the report.\n\nWhatever is not on the axis is **pinned** to its own widget, so no two arms\never differ in two ways at once.\n"
+        "# 5. The same edit, four times over\n\n**Press Run \u2014 this one works as-is.** It takes about four times as long as\nworkflow 2, because it is doing the edit four times.\n\nWorkflow 2 makes one edit and shows you the result. The question that follows\nis always *\"was that the edit, or was that the seed?\"* \u2014 re-sampling levels 3\nfrom an edited canvas is still sampling, and it lands somewhere different every\ntime. One picture cannot tell you which part you are looking at.\n\n*TF Sweep Edit* answers it. It runs the identical edit once per **seed**, and\nfor each one it also re-samples the *unedited* canvas with that same seed. Each\nrow of the table is then the edit's effect with the seed held fixed and\ncancelled out.\n\nRead the table in the node's own body:\n\n- **tokens changed** \u2014 how many of the 256 tokens the edit moved, at the final\n  level, against that arm's own no-edit baseline.\n- **spread across arms** \u2014 the one number worth having. Near zero means every\n  seed landed in the same place, so the *edit* decides the outcome. Large means\n  the seed does, and a single-seed result from workflow 2 was not telling you\n  much.\n\nThe contact sheet is the no-edit baseline first, then one frame per arm.\n\n**Try:**\n- *values*: `592,593,594,595` \u2014 any list, or `1-8` for a range. `arm_limit`\n  (advanced) is there so a mistyped range cannot hold the GPU for an hour.\n- *axis* \u2192 **`level (l*)`** with *values* `0-3`: the same edit applied at each\n  level in turn. This is the sweep the paper's Sec. 4.4 is really about \u2014\n  coarser edits cascade through more re-sampling, and the table shows it.\n- *axis* \u2192 **`strength`** with *values* `0.25,0.5,0.75,1.0`: where a blend stops\n  being a blend and starts being a replacement.\n- *output_arm* (advanced) picks which arm leaves on the `levels` output, for\n  saving or comparing. Everything else about that arm is in the report.\n\nGroup 5 writes both the table and the sheet to `output/trajectory_forcing/`\nunder the same *name*, so `sweep.md` and `sweep.png` belong to the same run.\nSaving the picture matters more than it looks: only the arm named by\n*output_arm* leaves this node as a trajectory, so every other arm exists in that\nsheet and nowhere else \u2014 and the preview above it goes to a temp folder that\ngets cleared.\n\nWhatever is not on the axis is **pinned** to its own widget, so no two arms\never differ in two ways at once.\n"
       ],
       "color": "#432",
       "bgcolor": "#653",
@@ -443,7 +443,8 @@
           "type": "IMAGE",
           "slot_index": 1,
           "links": [
-            13
+            13,
+            19
           ]
         },
         {
@@ -453,7 +454,8 @@
           "slot_index": 2,
           "links": [
             15,
-            18
+            18,
+            20
           ]
         }
       ],
@@ -661,6 +663,52 @@
         true
       ],
       "title": "keep the table \u2014 output/trajectory_forcing/"
+    },
+    {
+      "id": 14,
+      "type": "TFSaveImages",
+      "pos": [
+        1600,
+        1702
+      ],
+      "size": [
+        320,
+        144
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 19
+        },
+        {
+          "label": "levels",
+          "name": "levels",
+          "type": "TF_LEVELS",
+          "link": 20
+        }
+      ],
+      "outputs": [
+        {
+          "label": "path",
+          "name": "path",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TFSaveImages"
+      },
+      "widgets_values": [
+        "sweep",
+        false
+      ],
+      "title": "keep the sheet \u2014 same name as the table"
     }
   ],
   "links": [
@@ -807,6 +855,22 @@
       13,
       1,
       "TF_LEVELS"
+    ],
+    [
+      19,
+      9,
+      1,
+      14,
+      0,
+      "IMAGE"
+    ],
+    [
+      20,
+      9,
+      2,
+      14,
+      1,
+      "TF_LEVELS"
     ]
   ],
   "groups": [
@@ -864,12 +928,12 @@
     },
     {
       "id": 5,
-      "title": "5 \u00b7 Keep the numbers",
+      "title": "5 \u00b7 Keep the numbers and the picture",
       "bounding": [
         1578,
         1278,
         364,
-        256
+        590
       ],
       "color": "#3f789e",
       "font_size": 24,

@@ -173,6 +173,37 @@ that `min == -1` so no second sentinel can creep in below it.
 
 Reach for `auto_level_input` rather than a bare `Int.Input` with a `-1` default.
 
+#### Which spelling of "automatic" to reach for
+
+`-1` is not the only one here, and the three in use are not arbitrary — but the
+rule behind them had never been written down, which is how a fourth gets
+invented. It is the shape of the **domain**, not taste:
+
+| domain | spelling | in use by |
+|---|---|---|
+| closed, small, model-independent | fold the automatic case into a **combo**, so every option is legible without a convention | `TF Decode` / `TF Latent Preview`'s `which` — `all levels`, `level 2` |
+| closed, but its length is only known at runtime | a **combo option that opens with `auto`**, prepended to the list | `TF Load Pipeline`'s checkpoint — `AUTO_CHECKPOINT` is `"auto (download TF_L_edit)"` |
+| open, or bounded by the *model* rather than the method | **`-1`** plus the three disclosures above | `source_level`, resume `level` and `class_id`, `level_override` |
+
+Two reasons the level widgets are in the last row and should stay there:
+
+- **An `INT` input can receive a link and a `COMBO` cannot.** `TFRegionMap.level`
+  is an `INT` output that survived the cut of nine dead sockets precisely because
+  it drives an edit node's `level` (see `TestEveryScalarOutputDrivesAWidget`).
+  Making the level widgets combos would permanently sever `TFRegionMap.level →
+  TFResumeFromLevel.level`, a wiring that is not in a workflow today but is the
+  obvious one to want.
+- **The level domain is not closed.** `level_override` exists to address a model
+  with more than the four levels every released checkpoint has, which is why
+  these run to `MAX_LEVELS - 1` while the visible ones stop at
+  `SHIPPED_LEVELS - 1`. A combo preserving that needs sixteen entries plus
+  `auto`, which is worse than a number.
+
+So: a level is a number. A mode is a dropdown. If a new widget's automatic case
+is one of a handful of fixed choices that do not depend on which checkpoint is
+loaded, make it a combo and skip the sentinel entirely; otherwise use `-1` and
+pay the three disclosures.
+
 ## Nodes show their own results
 
 An `info` output is unreachable unless the node that computed it shows it:
