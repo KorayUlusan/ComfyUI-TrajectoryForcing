@@ -16,7 +16,10 @@ import pytest
 import torch
 from conftest import requires_comfy
 
-pytestmark = requires_comfy
+# `node_classes` builds every node schema, and TF Load Pipeline's config
+# dropdown is filled from `tf_configs()` at definition time -- so this file
+# needs the real checkout, and on a runner it is what fetches one.
+pytestmark = [requires_comfy, pytest.mark.needs_tf_checkout]
 
 LEVELS, GRID, CHANNELS = 4, 8, 6
 

@@ -68,6 +68,7 @@ a thin schema-and-wiring layer.
 
 ```bash
 pytest tests                                        # no GPU, seconds
+pytest tests --no-checkout                          # as a fresh runner sees it
 ./slurm/submit.sh slurm/gpu_smoke.sbatch            # nodes vs. the real model
 ./slurm/submit.sh slurm/server_smoke.sbatch         # workflows through a real server
 ./slurm/submit.sh slurm/measure_resources.sbatch    # the README's VRAM table
@@ -81,6 +82,26 @@ There are four layers, and each is blind to something the next one catches:
 | `gpu_smoke` | the nodes against the real model, with controls | ComfyUI's execution engine and wire protocol |
 | `server_smoke` | the workflows through a real server, on the compute node's loopback | the ncat bridge, which it never crosses |
 | `bridge_smoke` | login node to bridge to compute node, as a browser does it | the browser itself |
+
+`--no-checkout` exists because a green local run is not evidence. A dev machine
+has a TrajectoryForcing checkout sitting beside the extension, so `tf_repo()`
+never reaches its fetch branch and anything that depends on that branch passes
+by accident. The flag points both filesystem candidates at an empty directory
+and makes a real `git` call an error, which is what a fresh runner looks like.
+Tests that genuinely need upstream carry `needs_tf_checkout` and are skipped.
+
+Two guards in `tests/conftest.py` run always, and each maps to a red CI run this
+repo actually shipped:
+
+- **No test may leave the environment changed.** A probe that did
+  `os.environ.setdefault("TF_NO_AUTO_FETCH", "1")` disabled fetching for every
+  test that ran after it. `monkeypatch.setenv` is fine; a bare assignment is not.
+- **No unmarked test may leave a checkout in the extension directory.** One that
+  did made the "inside the extension" candidate exist for everything downstream,
+  and a test asserting the opt-out path stopped raising.
+
+Both were invisible locally and failed on a runner, twenty tests away from the
+cause. They now fail on the test that did it, with the reason.
 
 Nothing here drives a browser. When a report is about something only visible on
 screen, say which layer proved what rather than implying the whole path is

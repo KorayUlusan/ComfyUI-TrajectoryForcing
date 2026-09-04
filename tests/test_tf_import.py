@@ -8,12 +8,44 @@ proving both directions here.
 """
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
 from conftest import requires_comfy
 
-pytestmark = requires_comfy
+# Imports TrajectoryForcing's own modules, so it needs the real checkout.
+pytestmark = [requires_comfy, pytest.mark.needs_tf_checkout]
+
+
+#: `configure_jax_env` writes to os.environ on purpose -- that is the whole job,
+#: and it has to happen before the first `import jax`. Exercising it therefore
+#: mutates the process, which conftest's leak guard is right to object to. Hand
+#: every one of them to monkeypatch up front so the mutation is undone with the
+#: test rather than left for whatever runs next.
+_JAX_ENV = (
+    "XLA_PYTHON_CLIENT_PREALLOCATE",
+    "XLA_PYTHON_CLIENT_MEM_FRACTION",
+    "JAX_COMPILATION_CACHE_DIR",
+    "TF_XLA_MEM_FRACTION",
+)
+
+
+@pytest.fixture(autouse=True)
+def _contain_jax_env():
+    """Snapshot and restore by hand, not via monkeypatch.
+
+    `monkeypatch.delenv(name, raising=False)` records nothing when the variable
+    is already absent, so there is nothing to undo -- which is precisely the
+    case here, and why the first attempt at this fixture still leaked.
+    """
+    saved = {name: os.environ.get(name) for name in _JAX_ENV}
+    yield
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 @pytest.fixture(autouse=True)
