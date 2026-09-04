@@ -194,15 +194,22 @@ those two on the command line. `#SBATCH` lines cannot read a variable, so they a
 the one setting a job file cannot carry portably.
 </details>
 
-<details>
-<summary><b>Configuration</b>: every path, in one file</summary>
+## Configuration: the `.env` file
 
 Nothing has to be set if ComfyUI, the venv and this extension are where
-`env/setup.sh` puts them. Otherwise copy the template rather than editing scripts:
+`env/setup.sh` puts them. Everything else — where your ComfyUI lives, which venv
+to run, which Slurm partition to ask for, where the weights already are — is one
+gitignored file that every script in this repo sources:
 
 ```bash
-cp .env.example .env      # gitignored; every script sources it
+cp .env.example .env
 ```
+
+Every line is written `KEY="${KEY:-default}"`, so anything exported on the
+command line still wins: `WORK=/scratch ./run_comfyui.sh`.
+
+<details>
+<summary><b>Every variable, its default, and when to set it</b></summary>
 
 | variable | default | set it when |
 |---|---|---|
@@ -213,9 +220,11 @@ cp .env.example .env      # gitignored; every script sources it
 | `TF_RAE_ROOT` | `$TF_REPO/checkpoints/rae` | you already have the 2 GB decoder |
 | `TF_PARTITION` `TF_QOS` `TF_TIME` | none | any Slurm cluster |
 | `TF_XLA_MEM_FRACTION` | unset | sharing the GPU with a large torch model |
+| `TF_NO_AUTO_FETCH` | unset | you never want the TrajectoryForcing fetch attempted |
+| `TF_NO_AUTO_DEPS` | unset | `install.py` should not touch your environment |
 
-Every line is written `KEY="${KEY:-default}"`, so `WORK=/scratch ./run_comfyui.sh`
-still wins over the file.
+`TF_ENV_FILE` points somewhere other than `./.env`, which is how you keep one
+file per cluster.
 </details>
 
 <details>
@@ -235,6 +244,10 @@ install.
 It happens at ComfyUI startup rather than first generate, because the loader's
 config dropdown and the ImageNet class list are built from the checkout while node
 schemas are defined. Set `TF_NO_AUTO_FETCH=1` to turn it off.
+
+If that fetch cannot happen — no network, no `git`, a half-finished clone — the
+nodes still register and the reason is printed to ComfyUI's log. Only running one
+fails, with the same message. A missing checkout is not a broken install.
 
 Weights, both resolved on first use:
 

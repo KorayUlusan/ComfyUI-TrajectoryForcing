@@ -1,46 +1,95 @@
 name: publish to comfy registry
 
-# The release switch is `version` in pyproject.toml, not this file. A push to
-# main that changes that file publishes that version, which is why the trigger
-# is scoped to the one path rather than to the whole branch: ordinary commits
-# do not reach the registry. The registry also refuses to overwrite a version
-# that already exists, so a push that leaves the number alone is a no-op even
-# if the path filter is somehow satisfied.
+# The release switch is `version` in pyproject.toml, not this file, and not a
+# tag. What decides whether to publish is the registry itself: if the version in
+# pyproject.toml is not there yet, it goes out; if it is, this does nothing.
 #
-# Publishing by hand is still possible from Actions -> "publish to comfy
-# registry" -> Run workflow.
+# That is deliberate rather than a path filter on pyproject.toml, which is what
+# this used to be. A path filter fires exactly once per bump, so a release whose
+# tests were red at that moment loses its trigger: every later push leaves
+# pyproject.toml alone, the workflow never runs again, and the version bump is
+# spent. Asking the registry instead means any green push retries a release that
+# did not land, and a push that changes nothing else costs one API call.
 #
 # Needs the repository secret REGISTRY_ACCESS_TOKEN (Settings -> Secrets and
 # variables -> Actions) and a `[tool.comfy].PublisherId` matching the registry
 # publisher.
 
 on:
-  workflow_dispatch:
-
   push:
     branches: [main]
-    paths: [pyproject.toml]
+  workflow_dispatch:
 
 jobs:
-  # The whole of tests.yml -- ruff plus the 385-test suite -- called as a
-  # reusable workflow rather than copied. Called with a relative path, so it runs
-  # the tests *from the commit being published*, not from whatever main happens
-  # to hold. That is the difference between this and a `workflow_run` trigger,
-  # which fires after any tests.yml run finishes and would need extra logic to
-  # tie the result back to the right commit.
+  # Cheap, and first: a push that is not a release stops here in a few seconds
+  # rather than running the suite a second time to discover it has nothing to do.
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: check
+        name: Is this version already on the registry?
+        run: |
+          set -euo pipefail
+          read -r NAME VERSION <<<"$(python3 - <<'PY'
+          import tomllib
+          with open("pyproject.toml", "rb") as fh:
+              project = tomllib.load(fh)["project"]
+          print(project["name"], project["version"])
+          PY
+          )"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "pyproject.toml says $NAME $VERSION"
+
+          # Every status, not just Active: a Flagged or Pending version still
+          # occupies its number, and the registry refuses to re-publish it.
+          if ! curl -sf --max-time 30 \
+               "https://api.comfy.org/nodes/$NAME/versions" -o versions.json; then
+            # Not treated as "publish anyway". The registry is the only authority
+            # on what exists, and guessing wrong means a red run on every push
+            # until it comes back. The next push retries.
+            echo "::warning::could not reach the registry; skipping this run"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if python3 - "$VERSION" <<'PY'
+          import json, sys
+          wanted = sys.argv[1]
+          existing = [v["version"] for v in json.load(open("versions.json"))]
+          print("on the registry:", ", ".join(existing) or "nothing")
+          sys.exit(0 if wanted in existing else 1)
+          PY
+          then
+            echo "$VERSION is already published; nothing to do."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$VERSION is new; will publish once the tests pass."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The whole of tests.yml -- ruff plus the suite -- called as a reusable
+  # workflow rather than copied, and with a relative path, so it runs the tests
+  # from the commit being published rather than from whatever main holds.
   #
   # What green means here: lint and the CPU suite. It does NOT mean the GPU
   # smoke tests passed -- those need an H100 and are run from a cluster by hand
   # (see CONTRIBUTING.md). Run them before bumping the version.
   test:
+    needs: decide
+    if: needs.decide.outputs.publish == 'true'
     uses: ./.github/workflows/tests.yml
 
   publish:
-    # Gate: the registry is only reached if every job in `test` succeeded. A
-    # failed or cancelled run stops here, so a broken commit cannot be
-    # published -- which is the point of the split.
-    needs: test
+    needs: [decide, test]
+    if: needs.decide.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write        # only for the tag below
     steps:
       - uses: actions/checkout@v7
 
@@ -49,3 +98,22 @@ jobs:
       - uses: Comfy-Org/publish-node-action@main
         with:
           personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+
+      # After the registry accepts it, never before: a tag pointing at a version
+      # that failed to publish is worse than no tag, because it reads as a
+      # release that happened. Tagging here also means the tag cannot be
+      # forgotten, which is what happened to 0.1.0 and 0.1.1.
+      - name: Tag the released commit
+        env:
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION already tagged; leaving it alone."
+            exit 0
+          fi
+          git -c user.name="Koray Ulusan" \
+              -c user.email="korayulusan2@gmail.com" \
+              tag -a "v$VERSION" -m "$VERSION"
+          git push origin "refs/tags/v$VERSION"
+          echo "tagged v$VERSION at $(git rev-parse --short HEAD)"

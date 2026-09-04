@@ -457,21 +457,37 @@ print(xs.min(), w-1-xs.max(), ys.min(), h-1-ys.max())   # left right top bottom
 
 ---
 
-## Docs and commits
+## Sending a change
 
-| file | audience |
+Fork, branch, open a pull request. `pytest tests` and `ruff check .` both have to
+pass; CI runs them on every push and will not publish a release without them.
+
+If your change touches the model path -- anything under `pipeline.py`,
+`tokens.py` or the edit nodes -- say in the PR whether you ran `gpu_smoke`, and
+paste the result if you did. Nobody will hold it against you if you have no GPU;
+say so and it will be run for you. What causes trouble is a change described as
+tested when only the CPU suite was.
+
+Bug reports are far more useful with the output of:
+
+```bash
+python -m tf_nodes.doctor
+```
+
+which prints the versions, paths and weights that most reports end up asking for
+anyway.
+
+## Where the documentation lives
+
+| file | who it is for |
 |---|---|
-| `README.md` | someone who knows ComfyUI |
+| `README.md` | someone who already uses ComfyUI |
 | `docs/GETTING-STARTED.md` | someone who has never opened it |
-| `workflows/README.md` | the five examples |
-| `CONTRIBUTING.md` | this |
+| `workflows/README.md` | the five example graphs |
+| `CONTRIBUTING.md` | you, right now |
 
-Keep numbers in one place. The VRAM table comes from `measure_resources.py`,
-and every figure quoted anywhere should trace back to the run that produced it.
-When a result retires an earlier claim, mark the old one superseded rather than
-deleting it. The retraction is the evidence that the criteria were fixed in
-advance.
-
-Commit as `Koray Ulusan <korayulusan2@gmail.com>`, with no AI co-authors. This is
-a thesis artefact and records AI-assisted changes through the parent repository's
-`ai-logs/`.
+Keep numbers in one place. The VRAM table comes from `measure_resources.py`, and
+every figure quoted anywhere should trace back to the run that produced it. When
+a result retires an earlier claim, mark the old one superseded rather than
+deleting it -- the retraction is the evidence that the criteria were fixed in
+advance, and it is worth more than the tidier version would be.
