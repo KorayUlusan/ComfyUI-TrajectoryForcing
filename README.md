@@ -83,6 +83,10 @@ Rules:
   around.
 - Pass --mode remote to `comfy node install`, and run `comfy` with no
   virtualenv active.
+- Pass --skip-torch-or-directml to `comfy install`. That venv only runs the
+  Manager, and the PyTorch index currently fails on a fresh venv's pip with
+  "inconsistent Name" / "No matching distribution found for flit_core". If you
+  see that anywhere else, `pip install -U pip` in that venv first.
 
 If this is a cluster login node (sinfo/sbatch exist, nvidia-smi finds no GPU),
 do not try to run ComfyUI here and do not treat the missing GPU as a failed
@@ -120,7 +124,8 @@ export TF_HOME="$PWD/comfy-tf"
 
 python3.11 -m venv "$TF_HOME/cli"
 "$TF_HOME/cli/bin/pip" install comfy-cli
-"$TF_HOME/cli/bin/comfy" --workspace "$TF_HOME/ComfyUI" install --nvidia
+"$TF_HOME/cli/bin/comfy" --workspace "$TF_HOME/ComfyUI" \
+    install --nvidia --skip-torch-or-directml
 "$TF_HOME/cli/bin/comfy" --workspace "$TF_HOME/ComfyUI" \
     node install --mode remote comfyui-trajectoryforcing
 
@@ -142,6 +147,20 @@ Model code and weights are fetched on first use. Nothing else to download.
 > Also run `comfy` with no virtualenv active. It resolves `$VIRTUAL_ENV` ahead
 > of `--workspace`, so from an activated shell it installs into that
 > environment and ignores the flag.
+>
+> `--skip-torch-or-directml` is there for two reasons. That workspace venv only
+> drives ComfyUI-Manager, since the server runs from the venv `env/setup.sh`
+> builds, so a second copy of torch in it is wasted. And it avoids the PyTorch
+> wheel index, which currently breaks a fresh venv's stock pip:
+>
+> ```
+> has inconsistent Name: expected 'typing-extensions', but metadata has 'typing_extensions'
+> ERROR: No matching distribution found for flit_core<4,>=3.11
+> ```
+>
+> pip discards the wheel, falls back to the sdist, and that index has no build
+> backend to build it with. `env/setup.sh` is unaffected: it upgrades pip before
+> installing anything.
 
 | | |
 |---|---|
@@ -406,6 +425,34 @@ uses, and paste the output into a bug report rather than a screenshot.
 It will not import JAX or download anything while answering. Add `--devices` to
 have JAX enumerate the GPUs, but not inside a running ComfyUI: that initialises
 the backend, which cannot be undone in the process.
+
+<details>
+<summary><b><code>flit_core</code> / "inconsistent Name" while installing torch</b></summary>
+
+```
+Discarding ... typing_extensions-4.16.0-py3-none-any.whl ...
+  has inconsistent Name: expected 'typing-extensions', but metadata has 'typing_extensions'
+ERROR: Could not find a version that satisfies the requirement flit_core<4,>=3.11
+ERROR: No matching distribution found for flit_core<4,>=3.11
+```
+
+Not this extension, and not your machine. `download.pytorch.org/whl/...` serves a
+wheel whose internal `Name:` does not match the index's normalised spelling; an
+older pip discards it, falls back to the source distribution, and that index has
+no build backend to build it with. Because it is passed as `--index-url` there is
+no PyPI to fall back to either.
+
+Upgrade pip in whichever venv is doing the install, then retry:
+
+```bash
+<that venv>/bin/pip install -U pip
+```
+
+`env/setup.sh` already does this before it installs anything, so the venv that
+runs the model is unaffected. It bites the ComfyUI workspace venv, which
+`comfy install` creates and immediately installs into — which is why the route
+above passes `--skip-torch-or-directml` and keeps torch out of it entirely.
+</details>
 
 <details>
 <summary><b>An edit appears to do nothing</b></summary>

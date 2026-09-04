@@ -68,7 +68,8 @@ export TF_HOME="$HOME/trajectory-forcing"    # anywhere you like
 
 python3.11 -m venv "$TF_HOME/cli"
 "$TF_HOME/cli/bin/pip" install comfy-cli
-"$TF_HOME/cli/bin/comfy" --workspace "$TF_HOME/ComfyUI" install --nvidia
+"$TF_HOME/cli/bin/comfy" --workspace "$TF_HOME/ComfyUI" \
+    install --nvidia --skip-torch-or-directml
 "$TF_HOME/cli/bin/comfy" --workspace "$TF_HOME/ComfyUI" \
     node install --mode remote comfyui-trajectoryforcing
 
