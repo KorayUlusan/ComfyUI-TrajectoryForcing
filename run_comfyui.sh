@@ -93,7 +93,10 @@ export NO_PROXY="$no_proxy"
 PARENT="$(cd "$EXT_DIR/.." && pwd)"
 if [[ "$(basename "$PARENT")" == "custom_nodes" ]]; then
   OWNER="$(cd "$PARENT/.." && pwd)"
-  if [[ -f "$OWNER/main.py" && "$OWNER" != "$COMFY_DIR" ]]; then
+  # `-ef`, not `!=`: see the symlink note under "the custom_nodes symlink".
+  # /home/geiger and /weka/geiger are the same directory, so a string compare
+  # would announce a move between two spellings of one path.
+  if [[ -f "$OWNER/main.py" ]] && ! [[ "$OWNER" -ef "$COMFY_DIR" ]]; then
     echo "NOTE: this extension lives in $OWNER, not the configured $COMFY_DIR."
     echo "      Using $OWNER. Set COMFY_DIR in .env to silence this."
     COMFY_DIR="$OWNER"
@@ -107,8 +110,19 @@ echo "venv:     $VENV"
 # Only needed when the extension is somewhere else, which is the developer
 # layout: a git checkout linked in rather than copied.
 LINK="$COMFY_DIR/custom_nodes/$(basename "$EXT_DIR")"
-if [[ "$LINK" == "$EXT_DIR" ]]; then
-  :                                    # already in place; nothing to link
+# `-ef` throughout, never string comparison: it tests same device + inode, which
+# is the actual question ("are these one directory?") rather than a proxy for it.
+#
+# On this machine /home/geiger is a SYMLINK to /weka/geiger, so the same
+# directory has two correct spellings. `pwd` reports the logical path you cd'd
+# through (/home/...) while `readlink -f` fully canonicalises (/weka/...), so a
+# string compare between them is false for a link that is perfectly correct.
+# That is not hypothetical: launching from ~/msc-thesis/... aborted with
+# "already points at another copy of this extension" and named the SAME
+# directory as the offender. `-ef` is true across symlinks, bind mounts and
+# hard links, and needs no canonicalisation of either side.
+if [[ "$LINK" -ef "$EXT_DIR" ]]; then
+  :                                    # already in place or correctly linked
 elif [[ -L "$LINK" ]]; then
   # -e follows the link, so it is FALSE for a dangling one -- which is how this
   # used to fail with "ln: File exists" and take the whole launch with it. A
@@ -120,10 +134,15 @@ elif [[ -L "$LINK" ]]; then
     echo "replacing a dangling link at $LINK (its target is gone)"
     rm -f "$LINK"
     ln -s "$EXT_DIR" "$LINK"
-  elif [[ "$(readlink -f "$LINK")" != "$EXT_DIR" ]]; then
-    TARGET="$(readlink -f "$LINK")"
+  else
+    # Reached only when the link exists, resolves, and is genuinely a DIFFERENT
+    # directory -- the `-ef` above has already accepted every spelling of this
+    # one. Both paths are printed canonicalised, because the whole difficulty
+    # with this error is that two identical-looking paths can be two places and
+    # two different-looking ones can be the same place.
     echo "ERROR: $LINK already points at another copy of this extension:" >&2
-    echo "         $TARGET" >&2
+    echo "         link  -> $(readlink -f "$LINK")" >&2
+    echo "         this  -> $(readlink -f "$EXT_DIR")" >&2
     echo "       Two copies register the same node names and which one wins is" >&2
     echo "       undefined. Remove one, or run the launcher from the other." >&2
     exit 1
