@@ -141,8 +141,9 @@ def main() -> int:
     configure_jax_env()
     register_model_folder()
 
-    from tf_nodes.nodes_pipeline import TFDecode, TFGenerate, TFLatentPreview, TFLoadPipeline
     from PIL import Image
+
+    from tf_nodes.nodes_pipeline import TFDecode, TFGenerate, TFLatentPreview, TFLoadPipeline
 
     n_classes = int(os.environ.get("CLASSES", "0"))
     classes = SMOKE_CLASSES if n_classes <= 0 else (

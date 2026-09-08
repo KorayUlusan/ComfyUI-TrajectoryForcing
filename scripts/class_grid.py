@@ -125,8 +125,9 @@ def main() -> int:
     configure_jax_env()
     register_model_folder()
 
-    from tf_nodes.nodes_pipeline import TFDecode, TFGenerate, TFLoadPipeline
     from PIL import Image
+
+    from tf_nodes.nodes_pipeline import TFDecode, TFGenerate, TFLoadPipeline
 
     n_classes = int(os.environ.get("CLASSES", "0"))
     classes = SMOKE_CLASSES if n_classes <= 0 else (
@@ -182,7 +183,10 @@ def main() -> int:
             if sd == SEED:
                 finals[ci] = frames[-1].tobytes()
                 contrast[ci] = sh[3] / sh[0] if sh[0] > 0 else 0.0
-                (monotonic_ok if all(a < b for a, b in zip(sh, sh[1:]))
+                # strict=False on purpose: `sh[1:]` is one shorter than `sh` by
+                # construction, because this is a pairwise-adjacent comparison.
+                # strict=True would raise on every call.
+                (monotonic_ok if all(a < b for a, b in zip(sh, sh[1:], strict=False))
                  else monotonic_bad).append(ci)
             print(f"  seed {sd:5d} class {ci:4d}: gen {gen_times[-1]:5.2f}s  "
                   f"decode {dec_times[-1]:5.2f}s  L3/L0 "

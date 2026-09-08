@@ -97,10 +97,11 @@ def main() -> int:
     configure_jax_env()
     register_model_folder()
 
+    from PIL import Image
+
+    from tf_nodes.nodes_edit import TFFeatureEdit, TFResumeFromLevel
     from tf_nodes.nodes_pipeline import TFDecode, TFGenerate, TFLoadPipeline
     from tf_nodes.nodes_regions import TFRegionMap, TFTokensFromCoords
-    from tf_nodes.nodes_edit import TFFeatureEdit, TFResumeFromLevel
-    from PIL import Image
 
     n_classes = int(os.environ.get("CLASSES", "0"))
     classes = SMOKE_CLASSES if n_classes <= 0 else (
@@ -180,7 +181,7 @@ def main() -> int:
         # --- criterion 2, per class -----------------------------------------
         changed = ~np.isclose(edited.level(EDIT_LEVEL), levels.level(EDIT_LEVEL)).all(axis=-1)
         below_intact = all(
-            np.array_equal(edited.level(l), levels.level(l)) for l in range(EDIT_LEVEL)
+            np.array_equal(edited.level(lv), levels.level(lv)) for lv in range(EDIT_LEVEL)
         )
         (latent_ok if (np.array_equal(changed, target.mask) and below_intact)
          else latent_bad).append(ci)
