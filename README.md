@@ -36,10 +36,8 @@ That turns generation into a DAG with visible intermediates and a feedback edge.
 You can edit a level, re-sample the ones above it, and keep the ones below. Which
 is a node graph.
 
-| | |
-|---|---|
-| ![four levels of one trajectory](docs/img/trajectory.png) | ![before and after an edit](docs/img/edit.png) |
-| One trajectory, all four levels | Before and after an edit at level 2 |
+
+[![Watch the demo](docs/img/demo-thumbnail.png)](https://youtu.be/SytKeKhdAMk)
 
 > New to ComfyUI? [**docs/GETTING-STARTED.md**](docs/GETTING-STARTED.md) assumes
 > nothing and gets you to your first edit.
@@ -360,6 +358,12 @@ Weights, both resolved on first use:
 </details>
 
 ## Workflows
+
+
+| ![four levels of one trajectory](docs/img/trajectory.png) | ![before and after an edit](docs/img/edit.png) |
+|---|---|
+| One trajectory, all four levels | Before and after an edit at level 2 |
+
 
 Five examples, each self-documenting on the canvas. Walkthrough:
 [**example_workflows/README.md**](example_workflows/README.md).
