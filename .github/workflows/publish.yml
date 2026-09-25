@@ -89,9 +89,12 @@ jobs:
     if: needs.decide.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write        # only for the tag below
+      contents: write        # only for the tag and release below
     steps:
+      # Full history, so the release notes can list the commits since the last tag.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       # Respects .comfyignore, so the archive excludes tests/, slurm/, scripts/
       # and .github/ while keeping the docs the listing renders.
@@ -117,3 +120,29 @@ jobs:
               tag -a "v$VERSION" -m "$VERSION"
           git push origin "refs/tags/v$VERSION"
           echo "tagged v$VERSION at $(git rev-parse --short HEAD)"
+
+      # A tag alone leaves the sidebar's Releases section empty, which is how
+      # 0.1.0 to 0.1.6 went out. The notes are the commit subjects since the
+      # previous tag: commits land on main directly, so --generate-notes, which
+      # lists merged PRs, would come out nearly empty.
+      - name: Create the GitHub release
+        env:
+          VERSION: ${{ needs.decide.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "release v$VERSION already exists; leaving it alone."
+            exit 0
+          fi
+          git fetch --tags --force --quiet
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' "v$VERSION^" 2>/dev/null || true)
+          if [ -n "$PREV" ]; then
+            git log --no-merges --format='- %s' "$PREV..v$VERSION" > notes.md
+            printf '\n**Full changelog:** %s/%s/compare/%s...v%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$PREV" "$VERSION" >> notes.md
+          else
+            git log --no-merges --format='- %s' "v$VERSION" > notes.md
+          fi
+          gh release create "v$VERSION" --verify-tag --title "$VERSION" --notes-file notes.md --latest
+          echo "released v$VERSION"
